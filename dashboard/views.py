@@ -181,6 +181,23 @@ def render_backtester_view(lang: str):
             _render_pnl_distribution(results, T)
             _render_trade_table(results, T)
 
+            if hasattr(strat, 'ml_model') and strat.ml_model.is_trained:
+                st.subheader("🧠 XGBoost Feature Importance")
+                fig = strat.ml_model.plot_feature_importance()
+                if fig is not None:
+                    st.pyplot(fig)
+
+                fi = strat.ml_model.get_feature_importance()
+                if fi:
+                    total = sum(fi.values())
+                    weak = [f for f, v in fi.items() if v / total < 0.01]
+                    if weak:
+                        st.info(f"Low-importance features (<1%): {', '.join(weak)}. Consider dropping.")
+
+                if strat.ml_model.cv_scores_:
+                    avg_cv = np.mean(strat.ml_model.cv_scores_)
+                    st.metric("Walk-Forward CV Accuracy", f"{avg_cv * 100:.1f}%")
+
 
 def render_alert_view(lang: str):
     """Alert center — webhook config, per-symbol toggles, history."""
@@ -228,9 +245,22 @@ def _render_price_chart(range_bars, results, T):
     """Candlestick chart with trade markers (last 7 days)."""
     st.subheader("📈 Price & Trades")
     cutoff_date = range_bars.index.max() - timedelta(days=7)
-    plot_bars = range_bars[range_bars.index >= cutoff_date]
+    plot_bars = range_bars[range_bars.index >= cutoff_date].copy()
+    plot_bars = plot_bars.reset_index()
+    if 'Timestamp' not in plot_bars.columns:
+        plot_bars['Timestamp'] = plot_bars.iloc[:, 0]
+    plot_bars['_x'] = plot_bars['Timestamp'].astype(str)
+    dupes = plot_bars['_x'].duplicated(keep=False)
+    if dupes.any():
+        counts: dict = {}
+        labels = []
+        for val in plot_bars['_x']:
+            counts[val] = counts.get(val, 0) + 1
+            labels.append(f"{val} [{counts[val]}]" if counts[val] > 1 or val in [v for v, c in counts.items() if c > 0 and dupes.any()] else val)
+        plot_bars['_x'] = [f"{v}.{i}" for i, v in enumerate(plot_bars['_x'])]
 
-    x_strings = plot_bars.index.astype(str).tolist()
+    x_strings = plot_bars['_x'].tolist()
+    ts_values = plot_bars['Timestamp'].values
 
     plot_trades = []
     for t in results['trades_history']:
@@ -248,11 +278,10 @@ def _render_price_chart(range_bars, results, T):
 
     if plot_trades:
         def _snap(ts):
-            """Find nearest candle x-string for a given timestamp."""
-            idx = plot_bars.index.get_indexer([ts], method='nearest')[0]
-            if 0 <= idx < len(x_strings):
-                return x_strings[idx]
-            return x_strings[-1]
+            """Find nearest candle x-string by minimum absolute time difference."""
+            diffs = np.abs(ts_values - np.datetime64(ts))
+            idx = int(np.argmin(diffs))
+            return x_strings[idx]
 
         e_lx, e_ly, e_sx, e_sy, ex_x, ex_y = [], [], [], [], [], []
         for t in plot_trades:

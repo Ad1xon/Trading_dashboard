@@ -68,10 +68,13 @@ def walk_forward_optimization(
     train_ratio: float = 0.7,
     param_grid: dict | None = None,
     metric: str = 'sharpe_ratio',
+    indicator_warmup: int = 120,
 ) -> dict:
-    """Walk-forward optimization: optimize in-sample, validate out-of-sample per fold.
+    """Walk-forward optimization with indicator warm-up.
 
-    Returns dict with 'oos_results' and 'best_params_per_fold'.
+    Each OOS fold is prepended with ``indicator_warmup`` bars from the
+    training set so that rolling indicators (SMA-100, ATR-14, etc.)
+    produce valid values from the first true OOS bar.
     """
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
@@ -90,7 +93,9 @@ def walk_forward_optimization(
             continue
 
         train_data = range_bars.iloc[fold_start:train_end].copy()
-        test_data = range_bars.iloc[train_end:fold_end].copy()
+
+        warmup_start = max(fold_start, train_end - indicator_warmup)
+        test_data_with_warmup = range_bars.iloc[warmup_start:fold_end].copy()
 
         is_results = grid_search(
             strategy_cls, train_data, initial_capital,
@@ -105,7 +110,10 @@ def walk_forward_optimization(
         best_params_per_fold.append(best_params)
 
         strat = strategy_cls(**best_params)
-        oos_bt = run_advanced_backtest(test_data, initial_capital, risk_percent, slippage, strat, commission_pct)
+        oos_bt = run_advanced_backtest(
+            test_data_with_warmup, initial_capital,
+            risk_percent, slippage, strat, commission_pct,
+        )
         oos_record = {k: v for k, v in oos_bt.items() if k not in ('equity_curve', 'trades_history', 'drawdown_series')}
         oos_record['fold'] = fold
         oos_results.append(oos_record)

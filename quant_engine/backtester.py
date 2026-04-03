@@ -106,38 +106,44 @@ def run_advanced_backtest(
         tp_hit = False
         active_sl = np.nan
         if current_position != 0:
-            # Check dynamic MFE SL first, then static SL
             active_sl = dynamic_sl if not np.isnan(dynamic_sl) else (sl_prices[entry_idx] if has_sl else np.nan)
-            
+
             if not np.isnan(active_sl):
-                if current_position == 1 and closes[i] <= active_sl:
+                if current_position == 1 and lows[i] <= active_sl:
                     sl_hit = True
-                elif current_position == -1 and closes[i] >= active_sl:
+                elif current_position == -1 and highs[i] >= active_sl:
                     sl_hit = True
-                    
+
             if has_tp and not np.isnan(tp_prices[entry_idx]):
-                if current_position == 1 and closes[i] >= tp_prices[entry_idx]:
+                if current_position == 1 and highs[i] >= tp_prices[entry_idx]:
                     tp_hit = True
-                elif current_position == -1 and closes[i] <= tp_prices[entry_idx]:
+                elif current_position == -1 and lows[i] <= tp_prices[entry_idx]:
                     tp_hit = True
 
         hold_exit = max_hold > 0 and bars_held >= max_hold
         should_exit = current_position != 0 and (exit_signal or sl_hit or tp_hit or hold_exit)
 
         if should_exit:
-            trade_pnl = ((closes[i] - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
+            if sl_hit:
+                actual_exit = active_sl
+            elif tp_hit:
+                actual_exit = tp_prices[entry_idx]
+            else:
+                actual_exit = closes[i]
+
+            trade_pnl = ((actual_exit - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
             exit_reason = 'MFE_TRAIL' if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl else ('SL' if sl_hit else 'TP' if tp_hit else 'MAX_HOLD' if hold_exit else 'SIGNAL')
-            
+
             t_entry_idx[trade_count] = entry_idx
             t_exit_idx[trade_count] = i
             t_entry_price[trade_count] = entry_price
-            t_exit_price[trade_count] = closes[i]
+            t_exit_price[trade_count] = actual_exit
             t_type[trade_count] = current_position
             t_pnl[trade_count] = trade_pnl
             t_bars_held[trade_count] = bars_held
             t_exit_reason[trade_count] = exit_reason
             trade_count += 1
-            
+
             current_position = 0
             position_size_usd = 0.0
             bars_held = 0

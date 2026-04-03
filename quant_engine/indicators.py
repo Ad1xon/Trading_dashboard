@@ -1,18 +1,24 @@
+"""Technical indicators — RSI, ATR, VWAP, Bollinger, ADX, MACD, session features."""
+
 import pandas as pd
 import numpy as np
 
 
-def calculate_vwap_with_bands(df: pd.DataFrame) -> pd.DataFrame:
-    """Cumulative VWAP with ±2σ bands."""
+def calculate_vwap_with_bands(df: pd.DataFrame, window: int = 200) -> pd.DataFrame:
+    """Rolling anchored VWAP with ±2σ bands.
+
+    Uses a rolling window instead of cumulative sum to prevent the
+    indicator from flattening on multi-week datasets.
+    """
     df = df.copy()
     df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
     df['VP'] = df['Typical_Price'] * df['Volume']
-    df['Cumulative_VP'] = df['VP'].cumsum()
-    df['Cumulative_Vol'] = df['Volume'].cumsum()
-    df['VWAP'] = df['Cumulative_VP'] / df['Cumulative_Vol']
-    df['Price_Diff_Sq'] = ((df['Typical_Price'] - df['VWAP']) ** 2) * df['Volume']
-    df['Cumulative_Price_Diff_Sq'] = df['Price_Diff_Sq'].cumsum()
-    df['VWAP_Std'] = np.sqrt(df['Cumulative_Price_Diff_Sq'] / df['Cumulative_Vol'])
+    roll_vp = df['VP'].rolling(window=window, min_periods=1).sum()
+    roll_vol = df['Volume'].rolling(window=window, min_periods=1).sum()
+    df['VWAP'] = roll_vp / (roll_vol + 1e-10)
+    price_diff_sq = ((df['Typical_Price'] - df['VWAP']) ** 2) * df['Volume']
+    roll_diff_sq = price_diff_sq.rolling(window=window, min_periods=1).sum()
+    df['VWAP_Std'] = np.sqrt(roll_diff_sq / (roll_vol + 1e-10))
     df['VWAP_Upper_2'] = df['VWAP'] + (2 * df['VWAP_Std'])
     df['VWAP_Lower_2'] = df['VWAP'] - (2 * df['VWAP_Std'])
     return df

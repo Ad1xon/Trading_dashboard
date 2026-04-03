@@ -1,31 +1,37 @@
-"""XGBoost ML models — walk-forward training, expanded features, feature importance."""
+"""XGBoost ML models — walk-forward training, MFE target labeling, feature importance."""
 
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score
+import logging
 
 from .indicators import (
     calculate_rsi, calculate_atr, calculate_bollinger,
     calculate_adx, calculate_orderflow_proxy, calculate_return_autocorrelation,
 )
 from config import (
-    XGB_N_ESTIMATORS, XGB_MAX_DEPTH, XGB_LEARNING_RATE, 
-    XGB_REFIT_EVERY, XGB_HORIZON
+    XGB_N_ESTIMATORS, XGB_MAX_DEPTH, XGB_LEARNING_RATE,
+    XGB_REFIT_EVERY, XGB_HORIZON,
 )
+
+logger = logging.getLogger(__name__)
+
 
 class StatArbMLFilter:
     """ML-enhanced pair-trading filter for spread reversion probability."""
 
     def __init__(self):
         self.model = xgb.XGBClassifier(
-            n_estimators=XGB_N_ESTIMATORS, max_depth=XGB_MAX_DEPTH, learning_rate=XGB_LEARNING_RATE,
+            n_estimators=XGB_N_ESTIMATORS, max_depth=XGB_MAX_DEPTH,
+            learning_rate=XGB_LEARNING_RATE,
             objective='binary:logistic', random_state=42,
         )
         self.is_trained = False
 
     def prepare_features(self, spread: pd.Series, z_score: pd.Series, window: int = 10) -> pd.DataFrame:
+        """Build feature matrix for spread reversion classification."""
         df = pd.DataFrame()
         df['Z_Score'] = z_score
         df['Spread_Momentum_3'] = spread.diff(3)
@@ -39,6 +45,7 @@ class StatArbMLFilter:
         return df.dropna()
 
     def train(self, df_features: pd.DataFrame):
+        """Train on 80% chronological split."""
         X = df_features.drop('Target', axis=1)
         y = df_features['Target']
         split_idx = int(len(X) * 0.8)
@@ -50,18 +57,21 @@ class StatArbMLFilter:
         self.is_trained = True
 
     def predict_probability(self, latest_features: pd.DataFrame) -> float:
+        """Return P(reversion) for the latest observation."""
         if not self.is_trained:
             return 0.5
         return self.model.predict_proba(latest_features)[0][1]
 
 
 class XGBoostRangeBarModel:
-    """Walk-forward XGBoost classifier for range-bar price direction prediction.
+    """Walk-forward XGBoost classifier for range-bar price direction.
 
-    12+ features including RSI, ATR, Bollinger %B, ADX, volume delta,
-    return autocorrelation. Expanding-window walk-forward eliminates
-    look-ahead bias. Includes TimeSeriesSplit CV scoring and feature
-    importance tracking.
+    Uses MFE-based target labeling: a bar is labeled 1 (bullish setup)
+    if, within the next ``horizon`` bars, the price reaches +``tp_mult``
+    range-bar-sizes BEFORE hitting -``sl_mult`` range-bar-sizes.
+
+    Features: RSI, ATR, Bollinger %B/Width, ADX, volume delta,
+    return autocorrelation, directional momentum.
     """
 
     FEATURE_COLS = [
@@ -70,11 +80,14 @@ class XGBoostRangeBarModel:
         'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
     ]
 
-    def __init__(self):
+    def __init__(self, tp_mult: float = 3.0, sl_mult: float = 2.0):
         self.horizon_param = XGB_HORIZON
         self.refit_param = XGB_REFIT_EVERY
+        self.tp_mult = tp_mult
+        self.sl_mult = sl_mult
         self.model = xgb.XGBClassifier(
-            n_estimators=XGB_N_ESTIMATORS, max_depth=XGB_MAX_DEPTH, learning_rate=XGB_LEARNING_RATE,
+            n_estimators=XGB_N_ESTIMATORS, max_depth=XGB_MAX_DEPTH,
+            learning_rate=XGB_LEARNING_RATE,
             objective='binary:logistic', random_state=42,
             subsample=0.8, colsample_bytree=0.8,
         )
@@ -104,14 +117,49 @@ class XGBoostRangeBarModel:
         data['Return_5'] = np.log(data['Close'] / data['Close'].shift(5).clip(lower=1e-10))
         return data
 
+    def _build_mfe_target(self, data: pd.DataFrame) -> np.ndarray:
+        """MFE-based target: 1 if TP hit before SL within horizon, else 0.
+
+        For each bar, looks forward ``horizon`` bars. If the maximum
+        favorable excursion reaches ``tp_mult * ATR`` before the maximum
+        adverse excursion reaches ``sl_mult * ATR``, the label is 1.
+        """
+        closes = data['Close'].values
+        highs = data['High'].values
+        lows = data['Low'].values
+        atr = data['ATR_14'].values
+        n = len(data)
+        horizon = self.horizon_param
+        target = np.full(n, np.nan)
+
+        for i in range(n - horizon):
+            entry = closes[i]
+            local_atr = atr[i]
+            if np.isnan(local_atr) or local_atr < 1e-10:
+                continue
+
+            tp_level = entry + self.tp_mult * local_atr
+            sl_level = entry - self.sl_mult * local_atr
+
+            hit = 0
+            for j in range(i + 1, min(i + horizon + 1, n)):
+                if highs[j] >= tp_level:
+                    hit = 1
+                    break
+                if lows[j] <= sl_level:
+                    hit = 0
+                    break
+            target[i] = hit
+
+        return target
+
     def train(self, df: pd.DataFrame, initial_train_frac: float = 0.70):
-        """Expanding-window walk-forward training — predictions are strictly OOS."""
+        """Expanding-window walk-forward training with MFE target labeling."""
         horizon = self.horizon_param
         refit_every = self.refit_param
-        
+
         data = self.build_features(df)
-        future_returns = data['Close'].shift(-horizon) - data['Close']
-        data['Target'] = np.where(future_returns > 0, 1, 0)
+        data['Target'] = self._build_mfe_target(data)
         valid_mask = data[self.FEATURE_COLS + ['Target']].notna().all(axis=1)
         data = data.loc[valid_mask].copy()
 
@@ -127,14 +175,12 @@ class XGBoostRangeBarModel:
 
         while cursor < n:
             segment_end = min(cursor + refit_every, n)
-            # Purging (Embargo): drop the last `horizon` bars from training 
-            # to prevent overlapping target leak into the test set.
             train_end_purged = max(0, cursor - horizon)
-            
+
             if train_end_purged > 0:
                 self.model.fit(X_all[:train_end_purged], y_all[:train_end_purged], verbose=False)
                 predictions[cursor:segment_end] = self.model.predict_proba(X_all[cursor:segment_end])[:, 1]
-            
+
             cursor = segment_end
 
         data['WF_Prediction'] = predictions
@@ -155,7 +201,7 @@ class XGBoostRangeBarModel:
         self.cv_scores_ = scores
 
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
-        """Return bullish probability for each row (uses WF column if available)."""
+        """Return bullish probability for each row."""
         if 'WF_Prediction' in df_features.columns:
             return df_features['WF_Prediction'].fillna(0.5).values
         if not self.is_trained:
@@ -163,8 +209,51 @@ class XGBoostRangeBarModel:
         available = [c for c in self.FEATURE_COLS if c in df_features.columns]
         if len(available) < len(self.FEATURE_COLS):
             return np.full(len(df_features), 0.5)
-        return self.model.predict_proba(df_features[self.FEATURE_COLS].fillna(0).values)[:, 1]
+        X = df_features[self.FEATURE_COLS]
+        X = X.ffill().bfill().fillna(0)
+        return self.model.predict_proba(X.values)[:, 1]
 
     def get_feature_importance(self) -> dict:
         """Feature importances sorted descending."""
         return dict(sorted(self.feature_importances_.items(), key=lambda x: x[1], reverse=True))
+
+    def plot_feature_importance(self, save_path: str | None = None):
+        """Render horizontal bar chart of feature importances via matplotlib.
+
+        Returns the matplotlib Figure object. If ``save_path`` is given,
+        the chart is also saved to disk (PNG).
+        """
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        fi = self.get_feature_importance()
+        if not fi:
+            logger.warning("No feature importances available — model not trained.")
+            return None
+
+        features = list(fi.keys())
+        values = list(fi.values())
+        total = sum(values)
+        pct = [v / total * 100 if total > 0 else 0 for v in values]
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        colors = plt.cm.viridis(np.linspace(0.3, 0.9, len(features)))
+        bars = ax.barh(features[::-1], pct[::-1], color=colors[::-1], edgecolor='white', linewidth=0.5)
+
+        for bar, p in zip(bars, pct[::-1]):
+            ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
+                    f'{p:.1f}%', va='center', fontsize=9, color='#333')
+
+        ax.set_xlabel('Relative Importance (%)', fontsize=11)
+        ax.set_title('XGBoost Feature Importance (Walk-Forward)', fontsize=13, fontweight='bold')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(axis='x', alpha=0.3)
+        fig.tight_layout()
+
+        if save_path:
+            fig.savefig(save_path, dpi=150, bbox_inches='tight')
+            logger.info("Feature importance chart saved to %s", save_path)
+
+        return fig
