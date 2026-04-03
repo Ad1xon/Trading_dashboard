@@ -11,12 +11,10 @@ def load_translations(lang_code: str) -> dict:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
-        # Fallback to English if file missing
         with open(os.path.join(base_dir, 'locales', 'en.json'), 'r', encoding='utf-8') as f:
             return json.load(f)
 
 
-# Market Configuration
 MT5_SYMBOLS = {
     "EURUSD": "EURUSD.ecn",
     "GBPUSD": "GBPUSD.ecn",
@@ -30,22 +28,22 @@ MT5_SYMBOLS = {
 COMMISSION_USD_PER_LOT = 6.0
 DEFAULT_CONTRACT_SIZE = 100000
 
-# Trading Logic Configurations
 MFE_ACTIVATION_MULTIPLIER = 1.0
 MFE_TRAIL_PCT = 0.5
 DEFAULT_MAX_HOLDING = 100
 BARS_PER_YEAR = 252
 
-# ML Hyperparameters
 XGB_N_ESTIMATORS = 150
-XGB_MAX_DEPTH = 4
+XGB_MAX_DEPTH = 3
 XGB_LEARNING_RATE = 0.05
 XGB_REFIT_EVERY = 50
-XGB_HORIZON = 15
+XGB_HORIZON = 10
+XGB_TP_MULT = 1.5
+XGB_SL_MULT = 1.5
 
-# Strategy mapping for UI
 DEFAULT_STRATEGIES = {
     "strategy_ml_breakout": "MLVolatilityBreakout",
+    "strategy_ml_reversion": "MLBounceReversion",
     "strategy_breakout": "VolatilityBreakout",
     "strategy_reversion": "ZScoreMeanReversion",
     "strategy_vwap_bounce": "VWAPBounceStrategy",

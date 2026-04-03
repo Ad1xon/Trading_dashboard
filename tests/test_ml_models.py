@@ -7,9 +7,6 @@ import pytest
 from quant_engine.ml_models import XGBoostRangeBarModel, StatArbMLFilter
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# XGBoostRangeBarModel
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestXGBoostRangeBarModel:
     def test_build_features_columns(self, synthetic_ohlcv):
@@ -32,11 +29,9 @@ class TestXGBoostRangeBarModel:
         n = len(result)
         initial_end = int(n * 0.70)
 
-        # First 70% should have NaN predictions (they are in-sample, never predicted)
         first_chunk = result['WF_Prediction'].iloc[:initial_end]
         assert first_chunk.isna().all(), "In-sample region should have NaN predictions"
 
-        # OOS region should have actual predictions
         oos_chunk = result['WF_Prediction'].iloc[initial_end:]
         assert oos_chunk.notna().any(), "OOS region should have predictions"
 
@@ -78,9 +73,6 @@ class TestXGBoostRangeBarModel:
         assert (probs == 0.5).all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# StatArbMLFilter
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestStatArbMLFilter:
     def test_prepare_features(self):

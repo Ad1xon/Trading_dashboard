@@ -63,7 +63,6 @@ class EventBus:
                 data = event["data"]
                 
                 for cb in self._subscribers.get(topic, []):
-                    # Check if callback is a coroutine
                     if asyncio.iscoroutinefunction(cb):
                         asyncio.create_task(cb(topic, data))
                     else:

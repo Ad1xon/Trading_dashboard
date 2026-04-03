@@ -6,7 +6,6 @@ import pytest
 import pandas as pd
 import numpy as np
 
-# Ensure project root is on the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
@@ -20,7 +19,7 @@ def synthetic_ohlcv():
     n = 500
     timestamps = pd.date_range('2025-01-01', periods=n, freq='1min')
     base = 100.0
-    returns = np.random.randn(n) * 0.002   # ~0.2% per bar
+    returns = np.random.randn(n) * 0.002   
 
     close = base * np.exp(np.cumsum(returns))
     high = close * (1 + np.abs(np.random.randn(n) * 0.001))

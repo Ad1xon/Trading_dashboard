@@ -149,36 +149,41 @@ class MLVolatilityBreakout(BaseStrategy):
 
     params = {
         'lookback': (20, 10, 40, 5), 'prob_threshold': (0.55, 0.50, 0.70, 0.05),
-        'atr_trail_mult': (3.0, 2.0, 5.0, 0.5), 'atr_sl_mult': (2.0, 1.0, 3.0, 0.5),
-        'max_holding': (100, 50, 300, 50),
+        'atr_trail_mult': (3.0, 2.0, 5.0, 0.5), 'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_tp_mult': (2.0, 1.0, 4.0, 0.5), 'max_holding': (100, 50, 300, 50),
     }
 
     def __init__(self, lookback=20, prob_threshold=0.55,
-                 atr_trail_mult=3.0, atr_sl_mult=2.0, max_holding=100):
+                 atr_trail_mult=3.0, atr_sl_mult=1.5, atr_tp_mult=2.0, max_holding=100):
         self.lookback = lookback
         self.prob_threshold = prob_threshold
         self.atr_trail_mult = atr_trail_mult
         self.atr_sl_mult = atr_sl_mult
+        self.atr_tp_mult = atr_tp_mult
         self.max_holding = max_holding
-        self.ml_model = XGBoostRangeBarModel()
+        self.ml_model = XGBoostRangeBarModel(tp_mult=atr_tp_mult, sl_mult=atr_sl_mult)
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df['Macro_Trend'] = df['Close'].rolling(window=100).mean()
         atr = calculate_atr(df, 14)
         df['ATR'] = atr
+        df['Vol_MA_20'] = df['Volume'].rolling(20).mean()
+        df['Vol_Ratio'] = df['Volume'] / (df['Vol_MA_20'] + 1e-6)
 
-        wf_data = self.ml_model.train(df)
+        df['_uid'] = np.arange(len(df))
+        df_copy = df.copy()
+        wf_data = self.ml_model.train(df_copy)
         df['Bull_Prob'] = 0.5
         if wf_data is not None and 'WF_Prediction' in wf_data.columns:
-            pred_series = wf_data['WF_Prediction']
-            common_idx = df.index.intersection(pred_series.index)
-            df.loc[common_idx, 'Bull_Prob'] = pred_series.loc[common_idx].fillna(0.5)
+            mapped = wf_data.set_index('_uid')['WF_Prediction']
+            df['Bull_Prob'] = df['_uid'].map(mapped).fillna(0.5)
+        df.drop(columns=['_uid'], inplace=True)
 
         df['Local_High'] = df['High'].rolling(window=self.lookback).max().shift(1)
         df['Local_Low'] = df['Low'].rolling(window=self.lookback).min().shift(1)
 
-        bull_breakout = (df['Close'] > df['Local_High']) & (df['Close'] > df['Macro_Trend'])
-        bear_breakout = (df['Close'] < df['Local_Low']) & (df['Close'] < df['Macro_Trend'])
+        bull_breakout = (df['Close'] > df['Local_High']) & (df['Close'] > df['Macro_Trend']) & (df['Vol_Ratio'] > 1.0)
+        bear_breakout = (df['Close'] < df['Local_Low']) & (df['Close'] < df['Macro_Trend']) & (df['Vol_Ratio'] > 1.0)
 
         df['Signal'] = 0
         df.loc[bull_breakout & (df['Bull_Prob'] > self.prob_threshold), 'Signal'] = 1
@@ -191,11 +196,79 @@ class MLVolatilityBreakout(BaseStrategy):
         df['Std'] = df['Close'].rolling(window=self.lookback).std()
 
         df['SL_Price'] = np.nan
+        df['TP_Price'] = np.nan
         long_entries = df['Signal'] == 1
         short_entries = df['Signal'] == -1
         df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[long_entries, 'ATR']
         df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[short_entries, 'ATR']
+        
+        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[short_entries, 'ATR']
+        
+        df['Max_Hold'] = self.max_holding
+        return df
+
+
+class MLBounceReversion(BaseStrategy):
+    """Mean reversion strategy integrating XGBoost directional bias and Bollinger Bands.
+    
+    Trades against extreme momentum when ML confidence supports the reversal.
+    Handles highly noisy and ranging M1 micro-structure periods much better than breakout.
+    """
+
+    params = {
+        'bb_period': (20, 10, 40, 5), 'bb_std': (2.0, 1.5, 3.0, 0.5),
+        'prob_threshold': (0.55, 0.50, 0.70, 0.05),
+        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5), 'atr_tp_mult': (1.5, 1.0, 3.0, 0.5),
+        'max_holding': (50, 20, 150, 10),
+    }
+
+    def __init__(self, bb_period=20, bb_std=2.0, prob_threshold=0.55,
+                 atr_sl_mult=1.5, atr_tp_mult=1.5, max_holding=50):
+        self.bb_period = bb_period
+        self.bb_std = bb_std
+        self.prob_threshold = prob_threshold
+        self.atr_sl_mult = atr_sl_mult
+        self.atr_tp_mult = atr_tp_mult
+        self.max_holding = max_holding
+        self.ml_model = XGBoostRangeBarModel(tp_mult=atr_tp_mult, sl_mult=atr_sl_mult)
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        atr = calculate_atr(df, 14)
+        df['ATR'] = atr
+        bb = calculate_bollinger(df['Close'], self.bb_period, self.bb_std)
+        df['BB_Lower'], df['BB_Upper'] = bb['BB_Lower'], bb['BB_Upper']
+
+        df['_uid'] = np.arange(len(df))
+        df_copy = df.copy()
+        wf_data = self.ml_model.train(df_copy)
+        df['Bull_Prob'] = 0.5
+        if wf_data is not None and 'WF_Prediction' in wf_data.columns:
+            mapped = wf_data.set_index('_uid')['WF_Prediction']
+            df['Bull_Prob'] = df['_uid'].map(mapped).fillna(0.5)
+        df.drop(columns=['_uid'], inplace=True)
+
+        bull_bounce = (df['Close'] < df['BB_Lower']) | (df['Low'] < df['BB_Lower'])
+        bear_bounce = (df['Close'] > df['BB_Upper']) | (df['High'] > df['BB_Upper'])
+
+        df['Signal'] = 0
+        df.loc[bull_bounce & (df['Bull_Prob'] > self.prob_threshold), 'Signal'] = 1
+        df.loc[bear_bounce & (df['Bull_Prob'] < (1 - self.prob_threshold)), 'Signal'] = -1
+
+        df['Exit_Long'] = df['Close'] > bb['BB_Mid']
+        df['Exit_Short'] = df['Close'] < bb['BB_Mid']
+
+        df['SL_Price'] = np.nan
         df['TP_Price'] = np.nan
+        long_entries = df['Signal'] == 1
+        short_entries = df['Signal'] == -1
+        
+        df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[short_entries, 'ATR']
+        
+        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[short_entries, 'ATR']
+        
         df['Max_Hold'] = self.max_holding
         return df
 
@@ -335,6 +408,7 @@ STRATEGY_REGISTRY = {
     'ZScoreMeanReversion': ZScoreMeanReversion,
     'VolatilityBreakout': VolatilityBreakout,
     'MLVolatilityBreakout': MLVolatilityBreakout,
+    'MLBounceReversion': MLBounceReversion,
     'VWAPBounceStrategy': VWAPBounceStrategy,
     'MultiTimeframeMomentum': MultiTimeframeMomentum,
 }

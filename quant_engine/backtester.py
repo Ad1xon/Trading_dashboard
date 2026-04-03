@@ -42,7 +42,6 @@ def run_advanced_backtest(
     tp_prices = df['TP_Price'].values if has_tp else np.full(n, np.nan)
     max_hold = int(df['Max_Hold'].iloc[0]) if 'Max_Hold' in df.columns else 100
 
-    # Pulla params if available
     strat_mfe_activation = strategy.params.get('mfe_activation', [MFE_ACTIVATION_MULTIPLIER])[0]
     strat_mfe_trail_pct = strategy.params.get('mfe_trail_pct', [MFE_TRAIL_PCT])[0]
 
@@ -57,7 +56,6 @@ def run_advanced_backtest(
     low_since_entry = float('inf')
     dynamic_sl = np.nan
 
-    # Pre-allocate numpy arrays for trade logging (avoids dict overhead in loop)
     max_trades = n
     t_entry_idx = np.zeros(max_trades, dtype=int)
     t_exit_idx = np.zeros(max_trades, dtype=int)
@@ -82,7 +80,6 @@ def run_advanced_backtest(
             current_equity += pnl
             bars_held += 1
 
-            # Update MFE logic
             high_since_entry = max(high_since_entry, highs[i])
             low_since_entry = min(low_since_entry, lows[i])
 
@@ -166,7 +163,6 @@ def run_advanced_backtest(
 
         equity_curve[i] = current_equity
 
-    # Reconstruct dictionary out of loop for metric compatability
     trades_history = []
     index_vals = df.index.values
     for k in range(trade_count):

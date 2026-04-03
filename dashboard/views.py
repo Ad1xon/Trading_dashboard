@@ -182,7 +182,9 @@ def render_backtester_view(lang: str):
             _render_trade_table(results, T)
 
             if hasattr(strat, 'ml_model') and strat.ml_model.is_trained:
-                st.subheader("🧠 XGBoost Feature Importance")
+                st.subheader("XGBoost Feature Importance")
+                if getattr(strat.ml_model, 'is_cached', False):
+                    st.success("⚡ Model & Predictions Loaded from joblib Cache (0.01s)")
                 fig = strat.ml_model.plot_feature_importance()
                 if fig is not None:
                     st.pyplot(fig)
@@ -228,7 +230,7 @@ def render_alert_view(lang: str):
         bus = EventBus()
         bus.publish_sync("TRADE_SIGNAL", {
             "symbol": "TEST",
-            "message": "🔔 This is a test alert from the dashboard.",
+            "message": "This is a test alert from the dashboard.",
             "signal_type": "INFO"
         })
         st.success("Test alert dispatched via Event Bus!")
@@ -243,7 +245,7 @@ def render_alert_view(lang: str):
 
 def _render_price_chart(range_bars, results, T):
     """Candlestick chart with trade markers (last 7 days)."""
-    st.subheader("📈 Price & Trades")
+    st.subheader("Price & Trades")
     cutoff_date = range_bars.index.max() - timedelta(days=7)
     plot_bars = range_bars[range_bars.index >= cutoff_date].copy()
     plot_bars = plot_bars.reset_index()

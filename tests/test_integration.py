@@ -17,9 +17,6 @@ from quant_engine.strategies import (
 from quant_engine.strategy_optimizer import monte_carlo_simulation
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Full Pipeline: raw data → range bars → strategy → backtest
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestFullPipeline:
     """
@@ -48,7 +45,6 @@ class TestFullPipeline:
             commission_pct=0.00006,
         )
 
-        # Basic sanity
         assert 'total_return' in results
         assert 'equity_curve' in results
         assert len(results['equity_curve']) == len(range_bars)
@@ -68,9 +64,6 @@ class TestFullPipeline:
         assert 'sharpe_ratio' in results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Range Bar Generation
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestRangeBarGeneration:
     def test_range_bars_have_ohlcv(self, synthetic_ohlcv):
@@ -92,9 +85,6 @@ class TestRangeBarGeneration:
         assert len(rb_small) >= len(rb_big)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Monte Carlo Simulation
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestMonteCarlo:
     def test_monte_carlo_with_trades(self, range_bars):
@@ -120,21 +110,16 @@ class TestMonteCarlo:
         assert mc['terminal_equity_percentiles'] == {}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Alert Manager (unit-level, no network)
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestAlertManager:
     def test_alert_manager_dedup(self):
         from alerts.alert_manager import AlertManager
 
         mgr = AlertManager()
-        mgr.cooldown_sec = 999  # long cooldown
+        mgr.cooldown_sec = 999  
 
-        # No discord configured → fire returns False (no channel), but dedup should still track.
         result1 = mgr.fire("EURUSD", "test", "LONG")
         result2 = mgr.fire("EURUSD", "test", "LONG")
-        # Both should be False since no discord configured
         assert result1 is False
         assert result2 is False
 
@@ -144,13 +129,12 @@ class TestAlertManager:
         mgr = AlertManager()
         mgr.set_threshold("EURUSD", enabled=False)
         assert not mgr.is_symbol_enabled("EURUSD")
-        assert mgr.is_symbol_enabled("GBPUSD")  # default enabled
+        assert mgr.is_symbol_enabled("GBPUSD")  
 
     def test_confidence_threshold(self):
         from alerts.alert_manager import AlertManager
 
         mgr = AlertManager()
         mgr.set_threshold("XAUUSD", min_confidence=0.7, enabled=True)
-        # No discord → always False, but the confidence check happens before dispatch
         result = mgr.fire("XAUUSD", "test", "LONG", confidence=0.5)
         assert result is False

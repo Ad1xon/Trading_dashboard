@@ -1,11 +1,14 @@
 """XGBoost ML models — walk-forward training, MFE target labeling, feature importance."""
 
+import os
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score
 import logging
+from numpy.lib.stride_tricks import sliding_window_view
+from joblib import Memory
 
 from .indicators import (
     calculate_rsi, calculate_atr, calculate_bollinger,
@@ -13,10 +16,14 @@ from .indicators import (
 )
 from config import (
     XGB_N_ESTIMATORS, XGB_MAX_DEPTH, XGB_LEARNING_RATE,
-    XGB_REFIT_EVERY, XGB_HORIZON,
+    XGB_REFIT_EVERY, XGB_HORIZON, XGB_TP_MULT, XGB_SL_MULT
 )
 
 logger = logging.getLogger(__name__)
+
+cache_dir = os.path.join(os.path.dirname(__file__), '..', '.cache')
+os.makedirs(cache_dir, exist_ok=True)
+memory = Memory(cache_dir, verbose=0)
 
 
 class StatArbMLFilter:
@@ -63,6 +70,67 @@ class StatArbMLFilter:
         return self.model.predict_proba(latest_features)[0][1]
 
 
+@memory.cache
+def _cached_walk_forward_train(
+    df_index, df_values, df_columns, initial_train_frac,
+    n_estimators, max_depth, learning_rate,
+    horizon, refit_every, tp_mult, sl_mult, feature_cols
+):
+    """Core walk-forward logic, extracted for joblib caching.
+    Reconstructs DataFrame from primitive arrays to avoid hashing overhead/issues.
+    """
+    df = pd.DataFrame(df_values, index=df_index, columns=df_columns)
+    
+    model = xgb.XGBClassifier(
+        n_estimators=n_estimators, max_depth=max_depth,
+        learning_rate=learning_rate,
+        objective='binary:logistic', random_state=42,
+        subsample=0.8, colsample_bytree=0.8
+    )
+    
+    dummy_instance = XGBoostRangeBarModel(tp_mult=tp_mult, sl_mult=sl_mult)
+    data = dummy_instance.build_features(df)
+    data['Target'] = dummy_instance._build_mfe_target(data)
+    valid_mask = data[feature_cols + ['Target']].notna().all(axis=1)
+    data = data.loc[valid_mask].copy()
+
+    n = len(data)
+    initial_train_end = int(n * initial_train_frac)
+    if initial_train_end < 30:
+        return None, None, {}, []
+
+    X_all = data[feature_cols].values
+    y_all = data['Target'].values
+    predictions = np.full(n, np.nan)
+    cursor = initial_train_end
+
+    while cursor < n:
+        segment_end = min(cursor + refit_every, n)
+        train_end_purged = max(0, cursor - horizon)
+
+        if train_end_purged > 0:
+            X_train_sub = X_all[:train_end_purged]
+            y_train_sub = y_all[:train_end_purged]
+            model.fit(X_train_sub, y_train_sub, verbose=False)
+            predictions[cursor:segment_end] = model.predict_proba(X_all[cursor:segment_end])[:, 1]
+
+        cursor = segment_end
+
+    data['WF_Prediction'] = predictions
+    feature_importances = dict(zip(feature_cols, model.feature_importances_))
+    
+    tscv = TimeSeriesSplit(n_splits=5)
+    cv_scores = []
+    X_train_init = X_all[:initial_train_end]
+    y_train_init = y_all[:initial_train_end]
+    for train_idx, val_idx in tscv.split(X_train_init):
+        if len(train_idx) < 20:
+            continue
+        model.fit(X_train_init[train_idx], y_train_init[train_idx], verbose=False)
+        cv_scores.append(accuracy_score(y_train_init[val_idx], model.predict(X_train_init[val_idx])))
+
+    return data, model, feature_importances, cv_scores
+
 class XGBoostRangeBarModel:
     """Walk-forward XGBoost classifier for range-bar price direction.
 
@@ -80,7 +148,7 @@ class XGBoostRangeBarModel:
         'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
     ]
 
-    def __init__(self, tp_mult: float = 3.0, sl_mult: float = 2.0):
+    def __init__(self, tp_mult: float = XGB_TP_MULT, sl_mult: float = XGB_SL_MULT):
         self.horizon_param = XGB_HORIZON
         self.refit_param = XGB_REFIT_EVERY
         self.tp_mult = tp_mult
@@ -90,8 +158,10 @@ class XGBoostRangeBarModel:
             learning_rate=XGB_LEARNING_RATE,
             objective='binary:logistic', random_state=42,
             subsample=0.8, colsample_bytree=0.8,
+            early_stopping_rounds=10,
         )
         self.is_trained = False
+        self.is_cached = False
         self.feature_importances_: dict = {}
         self.cv_scores_: list = []
 
@@ -120,73 +190,59 @@ class XGBoostRangeBarModel:
     def _build_mfe_target(self, data: pd.DataFrame) -> np.ndarray:
         """MFE-based target: 1 if TP hit before SL within horizon, else 0.
 
-        For each bar, looks forward ``horizon`` bars. If the maximum
-        favorable excursion reaches ``tp_mult * ATR`` before the maximum
-        adverse excursion reaches ``sl_mult * ATR``, the label is 1.
+        Optimized vectorized implementation O(1) via sliding_window_view.
         """
         closes = data['Close'].values
         highs = data['High'].values
         lows = data['Low'].values
         atr = data['ATR_14'].values
-        n = len(data)
         horizon = self.horizon_param
-        target = np.full(n, np.nan)
+        n = len(data)
 
-        for i in range(n - horizon):
-            entry = closes[i]
-            local_atr = atr[i]
-            if np.isnan(local_atr) or local_atr < 1e-10:
-                continue
+        tp_levels = closes + self.tp_mult * atr
+        sl_levels = closes - self.sl_mult * atr
 
-            tp_level = entry + self.tp_mult * local_atr
-            sl_level = entry - self.sl_mult * local_atr
+        highs_padded = np.pad(highs, (0, horizon), mode='edge')
+        lows_padded = np.pad(lows, (0, horizon), mode='edge')
 
-            hit = 0
-            for j in range(i + 1, min(i + horizon + 1, n)):
-                if highs[j] >= tp_level:
-                    hit = 1
-                    break
-                if lows[j] <= sl_level:
-                    hit = 0
-                    break
-            target[i] = hit
+        high_windows = sliding_window_view(highs_padded, window_shape=horizon)[1:n+1]
+        low_windows = sliding_window_view(lows_padded, window_shape=horizon)[1:n+1]
+
+        high_hits = high_windows >= tp_levels[:, None]
+        low_hits = low_windows <= sl_levels[:, None]
+
+        high_any = high_hits.any(axis=1)
+        low_any = low_hits.any(axis=1)
+
+        high_idx = np.where(high_any, np.argmax(high_hits, axis=1), horizon + 1)
+        low_idx = np.where(low_any, np.argmax(low_hits, axis=1), horizon + 1)
+
+        target = np.where((high_idx <= low_idx) & high_any, 1, 0).astype(float)
+
+        invalid_mask = np.isnan(atr) | (atr < 1e-10)
+        target[invalid_mask] = np.nan
+        target[n - horizon:] = np.nan
 
         return target
 
+
+
     def train(self, df: pd.DataFrame, initial_train_frac: float = 0.70):
-        """Expanding-window walk-forward training with MFE target labeling."""
-        horizon = self.horizon_param
-        refit_every = self.refit_param
-
-        data = self.build_features(df)
-        data['Target'] = self._build_mfe_target(data)
-        valid_mask = data[self.FEATURE_COLS + ['Target']].notna().all(axis=1)
-        data = data.loc[valid_mask].copy()
-
-        n = len(data)
-        initial_train_end = int(n * initial_train_frac)
-        if initial_train_end < 30:
+        """Expanding-window walk-forward training. Caches via joblib."""
+        data, model, fi, cv_scores = _cached_walk_forward_train(
+            df.index, df.values, df.columns, initial_train_frac,
+            self.model.n_estimators, self.model.max_depth, self.model.learning_rate,
+            self.horizon_param, self.refit_param, self.tp_mult, self.sl_mult, self.FEATURE_COLS
+        )
+        
+        if data is None:
             return None
-
-        X_all = data[self.FEATURE_COLS].values
-        y_all = data['Target'].values
-        predictions = np.full(n, np.nan)
-        cursor = initial_train_end
-
-        while cursor < n:
-            segment_end = min(cursor + refit_every, n)
-            train_end_purged = max(0, cursor - horizon)
-
-            if train_end_purged > 0:
-                self.model.fit(X_all[:train_end_purged], y_all[:train_end_purged], verbose=False)
-                predictions[cursor:segment_end] = self.model.predict_proba(X_all[cursor:segment_end])[:, 1]
-
-            cursor = segment_end
-
-        data['WF_Prediction'] = predictions
+            
+        self.is_cached = True 
+        self.model = model
+        self.feature_importances_ = fi
+        self.cv_scores_ = cv_scores
         self.is_trained = True
-        self.feature_importances_ = dict(zip(self.FEATURE_COLS, self.model.feature_importances_))
-        self._run_cv(X_all[:initial_train_end], y_all[:initial_train_end])
         return data
 
     def _run_cv(self, X: np.ndarray, y: np.ndarray, n_splits: int = 5):
@@ -199,6 +255,8 @@ class XGBoostRangeBarModel:
             self.model.fit(X[train_idx], y[train_idx], verbose=False)
             scores.append(accuracy_score(y[val_idx], self.model.predict(X[val_idx])))
         self.cv_scores_ = scores
+
+
 
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
         """Return bullish probability for each row."""

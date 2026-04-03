@@ -17,9 +17,6 @@ from quant_engine.indicators import (
 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# RSI
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestRSI:
     def test_rsi_range(self, synthetic_ohlcv):
@@ -45,9 +42,6 @@ class TestRSI:
         assert rsi.iloc[-1] < 10
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ATR
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestATR:
     def test_atr_positive(self, synthetic_ohlcv):
@@ -71,9 +65,6 @@ class TestATR:
         assert atr.iloc[-1] < 0.001
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Bollinger Bands
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestBollinger:
     def test_bollinger_keys(self, synthetic_ohlcv):
@@ -91,14 +82,9 @@ class TestBollinger:
         """When price equals the mid band, %B ≈ 0.5."""
         prices = pd.Series([100.0] * 50)
         bb = calculate_bollinger(prices, 20)
-        # Constant series → std=0 → bands collapse, %B may be ill-defined
-        # but we test non-crash
         assert not bb['BB_PctB'].isna().all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# MACD
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestMACD:
     def test_macd_keys(self, synthetic_ohlcv):
@@ -111,9 +97,6 @@ class TestMACD:
         np.testing.assert_allclose(macd['MACD_Hist'].values, diff.values, atol=1e-10)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ADX
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestADX:
     def test_adx_range(self, synthetic_ohlcv):
@@ -123,9 +106,6 @@ class TestADX:
         assert (valid <= 100).all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# VWAP
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestVWAP:
     def test_vwap_columns(self, synthetic_ohlcv):
@@ -140,9 +120,6 @@ class TestVWAP:
         assert (valid['VWAP_Lower_2'] <= valid['VWAP']).all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Session Features
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestSessionFeatures:
     def test_session_columns(self, synthetic_ohlcv):
@@ -156,9 +133,6 @@ class TestSessionFeatures:
             assert set(result[col].unique()).issubset({0, 1})
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Order-Flow Proxy
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestOrderFlowProxy:
     def test_positive_for_bullish_bars(self):
@@ -179,9 +153,6 @@ class TestOrderFlowProxy:
         assert delta.iloc[0] < 0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Return Autocorrelation
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestReturnAutocorrelation:
     def test_autocorr_range(self, synthetic_ohlcv):

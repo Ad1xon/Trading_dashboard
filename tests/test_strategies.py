@@ -15,9 +15,6 @@ from quant_engine.strategies import (
 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Common contract: every strategy must produce required columns
-# ═══════════════════════════════════════════════════════════════════════════
 
 REQUIRED_COLUMNS = ['Signal', 'Exit_Long', 'Exit_Short', 'Std', 'SL_Price', 'Max_Hold']
 
@@ -50,9 +47,6 @@ class TestStrategyContract:
         assert set(result['Signal'].unique()).issubset({-1, 0, 1})
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ML strategy (slower, separate test)
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestMLVolatilityBreakout:
     def test_required_columns(self, synthetic_ohlcv):
@@ -69,18 +63,13 @@ class TestMLVolatilityBreakout:
         assert (valid >= 0).all() and (valid <= 1).all()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ZScoreMeanReversion specific
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestZScoreMeanReversion:
     def test_extreme_z_triggers_signal(self):
         """Manufacturing a Z-score beyond threshold should trigger a signal."""
         np.random.seed(0)
         n = 200
-        # Flat period then a steep drop — enough to push Z below -2.
         close = np.concatenate([np.full(180, 100.0), np.linspace(100, 90, 20)])
-        # Volume spikes at the end so the volume-above-avg filter passes
         volume = np.concatenate([np.full(180, 500.0), np.full(20, 2000.0)])
         df = pd.DataFrame({
             'Open': close,
@@ -92,7 +81,6 @@ class TestZScoreMeanReversion:
 
         strat = ZScoreMeanReversion(z_window=20, z_entry=2.0, adx_max=100)
         result = strat.generate_signals(df)
-        # The price drop should produce some long signals (Z < -2)
         assert (result['Signal'] == 1).any() or (result['Signal'] == -1).any()
 
     def test_params_dict(self):
@@ -104,9 +92,6 @@ class TestZScoreMeanReversion:
         assert len(ranges) > 0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# VolatilityBreakout specific
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestVolatilityBreakout:
     def test_breakout_on_new_high(self):
@@ -119,7 +104,7 @@ class TestVolatilityBreakout:
             'High': close + 0.3,
             'Low': close - 0.3,
             'Close': close,
-            'Volume': np.full(n, 5000.0),  # high volume to pass filter
+            'Volume': np.full(n, 5000.0),  
         }, index=pd.date_range('2025-01-01', periods=n, freq='1min'))
 
         strat = VolatilityBreakout(lookback=20, vol_mult=0.5)
@@ -127,14 +112,11 @@ class TestVolatilityBreakout:
         assert (result['Signal'] == 1).any(), "Should detect breakout on new high"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Strategy Registry
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestStrategyRegistry:
     def test_registry_complete(self):
         expected = {'ZScoreMeanReversion', 'VolatilityBreakout', 'MLVolatilityBreakout',
-                    'VWAPBounceStrategy', 'MultiTimeframeMomentum'}
+                    'MLBounceReversion', 'VWAPBounceStrategy', 'MultiTimeframeMomentum'}
         assert set(STRATEGY_REGISTRY.keys()) == expected
 
     def test_registry_instantiation(self):
@@ -143,9 +125,6 @@ class TestStrategyRegistry:
             assert hasattr(instance, 'generate_signals'), f"{name} missing generate_signals"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Liquidity Sweep
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestLiquiditySweep:
     def test_no_crash_on_small_data(self, small_ohlcv):

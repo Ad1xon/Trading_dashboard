@@ -32,6 +32,7 @@ venv/
 .env
 .streamlit/secrets.toml
 
+.cache/
 *.csv
 *.dat
 *.out

@@ -8,9 +8,6 @@ from quant_engine.backtester import run_advanced_backtest, _max_consecutive_loss
 from quant_engine.strategies import ZScoreMeanReversion, VolatilityBreakout
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# PnL correctness — no double-counting
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestPnLCorrectness:
     def test_no_trades_return_zero(self):
@@ -41,7 +38,7 @@ class TestPnLCorrectness:
     def test_equity_decreases_on_losing_long(self):
         """A long trade on a falling price should lose money."""
         n = 50
-        prices = np.linspace(100, 90, n)  # steady decline
+        prices = np.linspace(100, 90, n)  
         df = pd.DataFrame({
             'Open': prices,
             'High': prices + 0.5,
@@ -54,9 +51,9 @@ class TestPnLCorrectness:
             params = {}
             def generate_signals(self, df):
                 df['Signal'] = 0
-                df.iloc[1, df.columns.get_loc('Signal')] = 1  # enter long at bar 1
+                df.iloc[1, df.columns.get_loc('Signal')] = 1  
                 df['Exit_Long'] = False
-                df.iloc[-1, df.columns.get_loc('Exit_Long')] = True  # exit at last bar
+                df.iloc[-1, df.columns.get_loc('Exit_Long')] = True  
                 df['Exit_Short'] = False
                 df['Std'] = 1.0
                 return df
@@ -66,9 +63,6 @@ class TestPnLCorrectness:
         assert results['n_trades'] == 1
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Metrics
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestMetrics:
     def test_metrics_present(self, range_bars):
@@ -101,9 +95,6 @@ class TestMetrics:
         assert 0.0 <= results['win_rate'] <= 1.0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Max Consecutive Losses helper
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestMaxConsecutiveLosses:
     def test_empty(self):
@@ -119,9 +110,6 @@ class TestMaxConsecutiveLosses:
         assert _max_consecutive_losses([10, -5, -3, 20, -1, -2, -4, 5]) == 3
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# SL / TP / Max Hold
-# ═══════════════════════════════════════════════════════════════════════════
 
 class TestSLTP:
     def test_trades_have_exit_reason(self, range_bars):
