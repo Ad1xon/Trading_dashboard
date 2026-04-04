@@ -27,31 +27,26 @@ def generate_synthetic_range_bars(df_1m: pd.DataFrame, range_size: float) -> pd.
             is_bullish = row['Close'] >= row['Open']
 
             if is_bullish:
-                step = (row['Close'] - row['Open']) / n_splits if n_splits > 0 else 0
-                for s in range(n_splits):
-                    seg_open = row['Open'] + s * step
-                    seg_close = row['Open'] + (s + 1) * step
-                    bars.append({
-                        'Timestamp': index,
-                        'Open': seg_open,
-                        'High': seg_close + range_size * 0.1,
-                        'Low': seg_open - range_size * 0.1,
-                        'Close': seg_close,
-                        'Volume': row['Volume'] / n_splits,
-                    })
+                start = row['Low']
+                end = row['High']
             else:
-                step = (row['Open'] - row['Close']) / n_splits if n_splits > 0 else 0
-                for s in range(n_splits):
-                    seg_open = row['Open'] - s * step
-                    seg_close = row['Open'] - (s + 1) * step
-                    bars.append({
-                        'Timestamp': index,
-                        'Open': seg_open,
-                        'High': seg_open + range_size * 0.1,
-                        'Low': seg_close - range_size * 0.1,
-                        'Close': seg_close,
-                        'Volume': row['Volume'] / n_splits,
-                    })
+                start = row['High']
+                end = row['Low']
+
+            step = (end - start) / n_splits
+            vol_step = row['Volume'] / n_splits
+
+            for s in range(n_splits):
+                seg_open = start + s * step
+                seg_close = start + (s + 1) * step
+                bars.append({
+                    'Timestamp': index + pd.Timedelta(microseconds=s*10),
+                    'Open': seg_open,
+                    'High': max(seg_open, seg_close),
+                    'Low': min(seg_open, seg_close),
+                    'Close': seg_close,
+                    'Volume': vol_step,
+                })
             continue
 
         if current_bar is None:

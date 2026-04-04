@@ -9,12 +9,27 @@ def get_mt5_data(symbol: str, days: int, timeframe=mt5.TIMEFRAME_M1) -> pd.DataF
     if not mt5.initialize():
         return pd.DataFrame()
 
+    import numpy as np
+
     total_bars = days * 1440
-    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, total_bars)
+    chunk_size = 50000
+    all_rates = []
+    
+    pos = 0
+    while pos < total_bars:
+        fetch_size = min(chunk_size, total_bars - pos)
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, pos, fetch_size)
+        if rates is None or len(rates) == 0:
+            break
+        all_rates.insert(0, rates)
+        pos += fetch_size
+
     mt5.shutdown()
 
-    if rates is None or len(rates) == 0:
+    if not all_rates:
         return pd.DataFrame()
+
+    rates = np.concatenate(all_rates)
 
     df = pd.DataFrame(rates)
     df['time'] = pd.to_datetime(df['time'], unit='s')

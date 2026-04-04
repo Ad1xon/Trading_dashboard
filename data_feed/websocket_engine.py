@@ -3,6 +3,7 @@
 import asyncio
 import websockets
 import json
+import numpy as np
 from datetime import datetime
 from typing import Callable
 
@@ -19,7 +20,13 @@ class VolumeBarAggregator:
         self.bar_low = float('inf')
         self.bar_close = 0.0
         self.is_new_bar = True
-        self.historical_bars = []
+        
+        self.buffer_size = 500
+        self.hist_arr = np.zeros((self.buffer_size, 5), dtype=np.float64)
+        self.hist_timestamps = np.zeros(self.buffer_size, dtype=np.float64)
+        self.hist_idx = 0
+        self.hist_count = 0
+        
         self._callbacks: list[Callable] = []
 
     def on_bar_complete(self, callback: Callable):
@@ -40,17 +47,28 @@ class VolumeBarAggregator:
 
         if self.current_volume >= self.volume_threshold:
             self.bar_close = price
+            ts_sec = timestamp / 1000.0
+            
+            idx = self.hist_idx
+            self.hist_arr[idx, 0] = self.bar_open
+            self.hist_arr[idx, 1] = self.bar_high
+            self.hist_arr[idx, 2] = self.bar_low
+            self.hist_arr[idx, 3] = self.bar_close
+            self.hist_arr[idx, 4] = self.current_volume
+            self.hist_timestamps[idx] = ts_sec
+            
+            self.hist_idx = (self.hist_idx + 1) % self.buffer_size
+            if self.hist_count < self.buffer_size:
+                self.hist_count += 1
+                
             completed_bar = {
-                "timestamp": datetime.fromtimestamp(timestamp / 1000),
+                "timestamp": datetime.fromtimestamp(ts_sec),
                 "Open": self.bar_open, "High": self.bar_high,
                 "Low": self.bar_low, "Close": self.bar_close,
                 "Volume": self.current_volume, "Symbol": self.symbol,
             }
             self.current_volume = 0.0
             self.is_new_bar = True
-            self.historical_bars.append(completed_bar)
-            if len(self.historical_bars) > 500:
-                self.historical_bars.pop(0)
 
             for cb in self._callbacks:
                 try:
@@ -61,30 +79,38 @@ class VolumeBarAggregator:
         return None
 
 
-async def binance_trade_stream(
+import MetaTrader5 as mt5
+import time
+
+async def mt5_trade_stream(
     symbol: str, volume_threshold: float, on_bar: Callable | None = None,
 ):
-    """Connect to a single Binance trade stream and aggregate volume bars."""
-    stream_url = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@trade"
+    if not mt5.initialize():
+        return
+        
     aggregator = VolumeBarAggregator(volume_threshold, symbol=symbol.upper())
     if on_bar:
         aggregator.on_bar_complete(on_bar)
 
-    async for websocket in websockets.connect(stream_url):
+    last_time_msc = int(time.time() * 1000)
+    
+    while True:
         try:
-            async for message in websocket:
-                data = json.loads(message)
-                aggregator.process_tick(float(data['p']), float(data['q']), int(data['T']))
-        except websockets.ConnectionClosed:
-            await asyncio.sleep(2)
+            ticks = mt5.copy_ticks_from(symbol, last_time_msc, 100000, mt5.COPY_TICKS_ALL)
+            if ticks is not None and len(ticks) > 0:
+                for tick in ticks:
+                    if tick['time_msc'] > last_time_msc:
+                        price = tick['last'] if tick['last'] > 0 else tick['bid']
+                        volume = tick['volume'] if tick['volume'] > 0 else 1.0
+                        aggregator.process_tick(float(price), float(volume), int(tick['time_msc']))
+                        last_time_msc = max(last_time_msc, int(tick['time_msc']))
+            await asyncio.sleep(1.0)
         except Exception:
-            await asyncio.sleep(5)
-
+            await asyncio.sleep(5.0)
 
 async def multi_symbol_stream(
     symbols: list[str], volume_threshold: float, on_bar: Callable | None = None,
 ):
-    """Run parallel streams for multiple symbols."""
     await asyncio.gather(*[
-        binance_trade_stream(sym, volume_threshold, on_bar) for sym in symbols
+        mt5_trade_stream(sym, volume_threshold, on_bar) for sym in symbols
     ])

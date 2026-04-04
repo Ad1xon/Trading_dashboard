@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from config import (
     load_translations, MT5_SYMBOLS, COMMISSION_USD_PER_LOT,
-    DEFAULT_CONTRACT_SIZE,
+    CONTRACT_SIZES
 )
 from data_feed.mt5_connector import get_mt5_data
 from quant_engine.data_processor import generate_synthetic_range_bars
@@ -16,7 +16,7 @@ from quant_engine.backtester import run_advanced_backtest
 from quant_engine.strategies import (
     ZScoreMeanReversion, VolatilityBreakout, MLVolatilityBreakout,
     VWAPBounceStrategy, MultiTimeframeMomentum,
-    detect_liquidity_sweep,
+    detect_liquidity_sweep, MLBounceReversion
 )
 from quant_engine.indicators import (
     calculate_vwap_with_bands, calculate_rsi, calculate_atr,
@@ -124,7 +124,7 @@ def render_backtester_view(lang: str):
 
     strat_options = [
         T["strategy_ml_breakout"], T["strategy_breakout"], T["strategy_reversion"],
-        T["strategy_vwap_bounce"], T["strategy_mtf_momentum"],
+        T["strategy_vwap_bounce"], T["strategy_mtf_momentum"], T["strategy_ml_reversion"]
     ]
     strategy_choice = st.sidebar.selectbox(
         T["strat_select"], strat_options, key="bt_strategy",
@@ -132,11 +132,21 @@ def render_backtester_view(lang: str):
 
     capital = st.sidebar.number_input(T["capital"], value=10000.0, key="bt_capital")
     risk = st.sidebar.number_input(T["risk"], value=2.0, key="bt_risk") / 100.0
+    
+    def_range = 0.0010
+    def_slip = 0.0001
+    if "DAX" in selected_name or "NAS" in selected_name:
+        def_range, def_slip = 15.0, 0.5
+    elif "XAU" in selected_name:
+        def_range, def_slip = 1.5, 0.1
+    elif "JPY" in selected_name:
+        def_range, def_slip = 0.1, 0.01
+        
     range_val = st.sidebar.number_input(
-        T["range_size"], value=0.001, format="%.5f", key="bt_range_size",
+        T["range_size"], value=def_range, format="%.5f", key=f"bt_range_{selected_name}",
     )
     slippage = st.sidebar.number_input(
-        T["slippage"], value=0.0001, format="%.5f", key="bt_slippage",
+        T["slippage"], value=def_slip, format="%.5f", key=f"bt_slip_{selected_name}",
     )
 
     if st.button(T["run_sim"], key="btn_backtest"):
@@ -152,9 +162,11 @@ def render_backtester_view(lang: str):
                 return
 
             strat = _resolve_strategy(strategy_choice, T)
-            comm_pct = COMMISSION_USD_PER_LOT / DEFAULT_CONTRACT_SIZE
+            from config import COMMISSION_USD_PER_LOT, CONTRACT_SIZES
+            contract = CONTRACT_SIZES.get(symbol, 100000)
+            comm_pct = COMMISSION_USD_PER_LOT / contract
             results = run_advanced_backtest(
-                range_bars, capital, risk, slippage, strat, comm_pct,
+                range_bars, capital, risk, slippage, strat, comm_pct, symbol=symbol
             )
 
             c1, c2, c3, c4 = st.columns(4)

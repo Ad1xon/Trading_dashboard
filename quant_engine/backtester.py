@@ -12,6 +12,7 @@ def run_advanced_backtest(
     slippage: float,
     strategy: BaseStrategy,
     commission_pct: float,
+    symbol: str = "EURUSD",
 ) -> dict:
     """Run event-driven backtest on range bars.
 
@@ -26,7 +27,8 @@ def run_advanced_backtest(
     equity_curve = np.zeros(n)
     equity_curve[0] = initial_capital
 
-    from config import MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT
+    from config import MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT, CONTRACT_SIZES
+    contract_size = CONTRACT_SIZES.get(symbol, 100000.0)
 
     closes = df['Close'].values
     highs = df['High'].values
@@ -121,14 +123,28 @@ def run_advanced_backtest(
         should_exit = current_position != 0 and (exit_signal or sl_hit or tp_hit or hold_exit)
 
         if should_exit:
+            exit_slip = slippage if current_position == 1 else -slippage
+
             if sl_hit:
-                actual_exit = active_sl
+                actual_exit = active_sl - exit_slip
             elif tp_hit:
                 actual_exit = tp_prices[entry_idx]
             else:
-                actual_exit = closes[i]
+                actual_exit = closes[i] - exit_slip
 
-            trade_pnl = ((actual_exit - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
+            trade_pnl_raw = ((actual_exit - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
+            
+            if contract_size == 100000:
+                nominal_lot_value = contract_size
+            else:
+                nominal_lot_value = contract_size * entry_price
+
+            lots_traded = position_size_usd / (nominal_lot_value + 1e-8)
+            commission_cost = lots_traded * 6.0 * 2
+            
+            trade_pnl = trade_pnl_raw - commission_cost
+            current_equity += (trade_pnl - pnl)
+
             exit_reason = 'MFE_TRAIL' if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl else ('SL' if sl_hit else 'TP' if tp_hit else 'MAX_HOLD' if hold_exit else 'SIGNAL')
 
             t_entry_idx[trade_count] = entry_idx
@@ -153,8 +169,6 @@ def run_advanced_backtest(
             vol = stds[i] if not np.isnan(stds[i]) and stds[i] > 0 else (closes[i] * 0.001)
             risk_amt = current_equity * risk_percent
             position_size_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
-            cost = position_size_usd * (commission_pct + (slippage / (entry_price + 1e-8)))
-            current_equity -= cost
             current_position = sig
             bars_held = 0
             high_since_entry = highs[i]

@@ -41,12 +41,17 @@ class DiscordNotifier:
             }]
         }
 
-        try:
-            resp = requests.post(self.webhook_url, json=payload, timeout=5)
-            success = resp.status_code in (200, 204)
-        except Exception as exc:
-            logger.error("Discord send failed: %s", exc)
-            success = False
+        import threading
+        
+        def _async_post(payload_data):
+            try:
+                resp = requests.post(self.webhook_url, json=payload_data, timeout=5)
+                success = resp.status_code in (200, 204)
+            except Exception as exc:
+                logger.error("Discord send failed: %s", exc)
+                success = False
+
+        threading.Thread(target=_async_post, args=(payload,), daemon=True).start()
 
         self._send_times.append(now)
         self.history.append({
@@ -54,7 +59,7 @@ class DiscordNotifier:
             "asset": asset,
             "signal_type": signal_type,
             "message": message,
-            "sent": success,
+            "sent": True,
         })
         if len(self.history) > 500:
             self.history = self.history[-500:]

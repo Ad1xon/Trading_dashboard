@@ -268,7 +268,7 @@ class XGBoostRangeBarModel:
         if len(available) < len(self.FEATURE_COLS):
             return np.full(len(df_features), 0.5)
         X = df_features[self.FEATURE_COLS]
-        X = X.ffill().bfill().fillna(0)
+        X = X.ffill().fillna(0)
         return self.model.predict_proba(X.values)[:, 1]
 
     def get_feature_importance(self) -> dict:

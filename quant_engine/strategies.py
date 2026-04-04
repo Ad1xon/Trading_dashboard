@@ -174,9 +174,18 @@ class MLVolatilityBreakout(BaseStrategy):
         df_copy = df.copy()
         wf_data = self.ml_model.train(df_copy)
         df['Bull_Prob'] = 0.5
+        
+        df_features = self.ml_model.build_features(df)
+        df_features.fillna(0, inplace=True)
+        
         if wf_data is not None and 'WF_Prediction' in wf_data.columns:
             mapped = wf_data.set_index('_uid')['WF_Prediction']
             df['Bull_Prob'] = df['_uid'].map(mapped).fillna(0.5)
+        else:
+            trained_mask = df_features.index.isin(df_features.dropna().index)
+            if trained_mask.any() and self.ml_model.is_trained:
+                df.loc[trained_mask, 'Bull_Prob'] = self.ml_model.predict_proba(df_features[trained_mask])
+                
         df.drop(columns=['_uid'], inplace=True)
 
         df['Local_High'] = df['High'].rolling(window=self.lookback).max().shift(1)
@@ -243,9 +252,18 @@ class MLBounceReversion(BaseStrategy):
         df_copy = df.copy()
         wf_data = self.ml_model.train(df_copy)
         df['Bull_Prob'] = 0.5
+        
+        df_features = self.ml_model.build_features(df)
+        df_features.fillna(0, inplace=True)
+        
         if wf_data is not None and 'WF_Prediction' in wf_data.columns:
             mapped = wf_data.set_index('_uid')['WF_Prediction']
             df['Bull_Prob'] = df['_uid'].map(mapped).fillna(0.5)
+        else:
+            trained_mask = df_features.index.isin(df_features.dropna().index)
+            if trained_mask.any() and self.ml_model.is_trained:
+                df.loc[trained_mask, 'Bull_Prob'] = self.ml_model.predict_proba(df_features[trained_mask])
+                
         df.drop(columns=['_uid'], inplace=True)
 
         bull_bounce = (df['Close'] < df['BB_Lower']) | (df['Low'] < df['BB_Lower'])

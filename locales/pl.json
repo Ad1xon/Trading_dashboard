@@ -44,6 +44,7 @@
     "strategy_ml_breakout": "Wybicie ML (XGBoost)",
     "strategy_vwap_bounce": "VWAP Bounce + Wolumen",
     "strategy_mtf_momentum": "Momentum Wielo-TF",
+    "strategy_ml_reversion": "ML Reversion Bounce (XGBoost)",
     "col_symbol": "Symbol",
     "col_price": "Cena",
     "col_vwap": "VWAP",
