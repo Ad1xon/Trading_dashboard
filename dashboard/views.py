@@ -1,3 +1,4 @@
+# dashboard/views.py
 """Dashboard views — scanner, backtester, alert center."""
 
 import streamlit as st
@@ -13,11 +14,7 @@ from config import (
 from data_feed.mt5_connector import get_mt5_data
 from quant_engine.data_processor import generate_synthetic_range_bars
 from quant_engine.backtester import run_advanced_backtest
-from quant_engine.strategies import (
-    ZScoreMeanReversion, VolatilityBreakout, MLVolatilityBreakout,
-    VWAPBounceStrategy, MultiTimeframeMomentum,
-    detect_liquidity_sweep, MLBounceReversion
-)
+from quant_engine.strategies import STRATEGY_REGISTRY, detect_liquidity_sweep
 from quant_engine.indicators import (
     calculate_vwap_with_bands, calculate_rsi, calculate_atr,
 )
@@ -25,14 +22,12 @@ from alerts.alert_manager import AlertManager
 
 
 def _get_alert_manager() -> AlertManager:
-    """Lazy-init AlertManager in Streamlit session state."""
     if 'alert_manager' not in st.session_state:
         st.session_state.alert_manager = AlertManager()
     return st.session_state.alert_manager
 
 
 def render_scanner_view(lang: str):
-    """Market scanner — multi-symbol VWAP/RSI/ATR scan with liquidity sweep detection."""
     T = load_translations(lang)
     st.sidebar.header(T["settings"])
 
@@ -50,7 +45,7 @@ def render_scanner_view(lang: str):
     if st.button(T["run_scanner"], key="btn_scanner"):
         with st.spinner(T["scanner_running"]):
             scan_results = []
-            
+
             from utils.event_bus import EventBus
             bus = EventBus()
 
@@ -111,7 +106,6 @@ def render_scanner_view(lang: str):
 
 
 def render_backtester_view(lang: str):
-    """Advanced backtester — full metrics, equity/drawdown charts, trade table."""
     T = load_translations(lang)
     st.sidebar.header(T["backtest_params"])
 
@@ -122,17 +116,14 @@ def render_backtester_view(lang: str):
 
     days_back = st.sidebar.slider(T["history_days"], 1, 365, 30, key="bt_days")
 
-    strat_options = [
-        T["strategy_ml_breakout"], T["strategy_breakout"], T["strategy_reversion"],
-        T["strategy_vwap_bounce"], T["strategy_mtf_momentum"], T["strategy_ml_reversion"]
-    ]
+    strat_options = list(STRATEGY_REGISTRY.keys())
     strategy_choice = st.sidebar.selectbox(
         T["strat_select"], strat_options, key="bt_strategy",
     )
 
     capital = st.sidebar.number_input(T["capital"], value=10000.0, key="bt_capital")
     risk = st.sidebar.number_input(T["risk"], value=2.0, key="bt_risk") / 100.0
-    
+
     def_range = 0.0010
     def_slip = 0.0001
     if "DAX" in selected_name or "NAS" in selected_name:
@@ -141,7 +132,7 @@ def render_backtester_view(lang: str):
         def_range, def_slip = 1.5, 0.1
     elif "JPY" in selected_name:
         def_range, def_slip = 0.1, 0.01
-        
+
     range_val = st.sidebar.number_input(
         T["range_size"], value=def_range, format="%.5f", key=f"bt_range_{selected_name}",
     )
@@ -161,7 +152,9 @@ def render_backtester_view(lang: str):
                 st.warning("Insufficient range bars generated.")
                 return
 
-            strat = _resolve_strategy(strategy_choice, T)
+            strat_cls = STRATEGY_REGISTRY[strategy_choice]
+            strat = strat_cls()
+
             from config import COMMISSION_USD_PER_LOT, CONTRACT_SIZES
             contract = CONTRACT_SIZES.get(symbol, 100000)
             comm_pct = COMMISSION_USD_PER_LOT / contract
@@ -193,8 +186,8 @@ def render_backtester_view(lang: str):
             _render_pnl_distribution(results, T)
             _render_trade_table(results, T)
 
-            if hasattr(strat, 'ml_model') and strat.ml_model.is_trained:
-                st.subheader("XGBoost Feature Importance")
+            if hasattr(strat, 'ml_model') and getattr(strat.ml_model, 'is_trained', False):
+                st.subheader(f"{strategy_choice} Feature Importance")
                 if getattr(strat.ml_model, 'is_cached', False):
                     st.success("⚡ Model & Predictions Loaded from joblib Cache (0.01s)")
                 fig = strat.ml_model.plot_feature_importance()
@@ -208,13 +201,12 @@ def render_backtester_view(lang: str):
                     if weak:
                         st.info(f"Low-importance features (<1%): {', '.join(weak)}. Consider dropping.")
 
-                if strat.ml_model.cv_scores_:
+                if getattr(strat.ml_model, 'cv_scores_', None):
                     avg_cv = np.mean(strat.ml_model.cv_scores_)
                     st.metric("Walk-Forward CV Accuracy", f"{avg_cv * 100:.1f}%")
 
 
 def render_alert_view(lang: str):
-    """Alert center — webhook config, per-symbol toggles, history."""
     T = load_translations(lang)
     alert_mgr = _get_alert_manager()
 
@@ -256,7 +248,6 @@ def render_alert_view(lang: str):
 
 
 def _render_price_chart(range_bars, results, T):
-    """Candlestick chart with trade markers (last 7 days)."""
     st.subheader("Price & Trades")
     cutoff_date = range_bars.index.max() - timedelta(days=7)
     plot_bars = range_bars[range_bars.index >= cutoff_date].copy()
@@ -292,7 +283,6 @@ def _render_price_chart(range_bars, results, T):
 
     if plot_trades:
         def _snap(ts):
-            """Find nearest candle x-string by minimum absolute time difference."""
             diffs = np.abs(ts_values - np.datetime64(ts))
             idx = int(np.argmin(diffs))
             return x_strings[idx]
@@ -333,7 +323,6 @@ def _render_price_chart(range_bars, results, T):
 
 
 def _render_equity_chart(results, T):
-    """Strategy equity vs Buy & Hold comparison."""
     st.subheader(T["equity_curve"])
     eq_fig = go.Figure()
     eq_data = results['equity_curve']
@@ -350,7 +339,6 @@ def _render_equity_chart(results, T):
 
 
 def _render_drawdown_chart(results, T):
-    """Underwater drawdown chart."""
     st.subheader(T["drawdown_chart"])
     dd_series = results.get('drawdown_series')
     if dd_series is None or len(dd_series) == 0:
@@ -366,7 +354,6 @@ def _render_drawdown_chart(results, T):
 
 
 def _render_pnl_distribution(results, T):
-    """Bar chart of individual trade PnLs."""
     if not results['trades_history']:
         return
     st.subheader(T["trade_dist"])
@@ -379,7 +366,6 @@ def _render_pnl_distribution(results, T):
 
 
 def _render_trade_table(results, T):
-    """Detailed trade log table with conditional PnL coloring."""
     if not results['trades_history']:
         return
     st.subheader(T["trade_history"])
@@ -410,21 +396,7 @@ def _render_trade_table(results, T):
     )
 
 
-def _resolve_strategy(choice: str, T: dict):
-    """Map UI strategy label to an instantiated strategy object."""
-    if choice == T["strategy_ml_breakout"]:
-        return MLVolatilityBreakout(lookback=20, prob_threshold=0.55)
-    elif choice == T["strategy_breakout"]:
-        return VolatilityBreakout(lookback=20)
-    elif choice == T["strategy_vwap_bounce"]:
-        return VWAPBounceStrategy()
-    elif choice == T["strategy_mtf_momentum"]:
-        return MultiTimeframeMomentum()
-    return ZScoreMeanReversion()
-
-
 def _colored_metric(col, label: str, value: float, fmt: str = "{:.2f}", invert: bool = False):
-    """Display a metric with green/red colour based on sign."""
     formatted = fmt.format(value)
     good = value < 0 if invert else value > 0
     color = "#00ff88" if good else "#ff4444"

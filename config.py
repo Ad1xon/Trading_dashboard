@@ -1,3 +1,4 @@
+# config.py
 """Project configuration — symbols, defaults, magic numbers."""
 
 import json
@@ -50,10 +51,11 @@ XGB_TP_MULT = 1.5
 XGB_SL_MULT = 1.5
 
 DEFAULT_STRATEGIES = {
-    "strategy_ml_breakout": "MLVolatilityBreakout",
-    "strategy_ml_reversion": "MLBounceReversion",
-    "strategy_breakout": "VolatilityBreakout",
-    "strategy_reversion": "ZScoreMeanReversion",
-    "strategy_vwap_bounce": "VWAPBounceStrategy",
-    "strategy_mtf_momentum": "MultiTimeframeMomentum",
+    "ZScore Rev": "ZScoreMeanReversion",
+    "SMC Breakout": "VolatilityBreakout",
+    "XGB Breakout": "MLVolatilityBreakout",
+    "XGB Bounce": "MLBounceReversion",
+    "VWAP Bounce": "VWAPBounceStrategy",
+    "MTF Momentum": "MultiTimeframeMomentum",
+    "LGBM Arab Scalp": "ArabianScalper",
 }

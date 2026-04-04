@@ -1,12 +1,9 @@
-"""Strategy optimizer — grid search, walk-forward optimization, Monte Carlo simulation."""
-
 import itertools
 import numpy as np
 import pandas as pd
 from typing import Type
-from .strategies import BaseStrategy
+from .strategies.base import BaseStrategy
 from .backtester import run_advanced_backtest
-
 
 def grid_search(
     strategy_cls: Type[BaseStrategy],
@@ -19,11 +16,6 @@ def grid_search(
     metric: str = 'sharpe_ratio',
     top_n: int = 10,
 ) -> list[dict]:
-    """Exhaustive grid search over strategy parameter combinations.
-
-    If param_grid is None, auto-generates from strategy.params ranges.
-    Returns top_n results sorted by metric, best first.
-    """
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
@@ -45,9 +37,7 @@ def grid_search(
     results.sort(key=lambda x: x.get(metric, -999), reverse=True)
     return results[:top_n]
 
-
 def _auto_grid(strategy_cls: Type[BaseStrategy]) -> dict:
-    """Build parameter grid from strategy.params (default, min, max, step) tuples."""
     grid = {}
     for name, (default, lo, hi, step) in strategy_cls.params.items():
         if isinstance(default, int):
@@ -55,7 +45,6 @@ def _auto_grid(strategy_cls: Type[BaseStrategy]) -> dict:
         else:
             grid[name] = list(np.arange(lo, hi + step / 2, step))
     return grid
-
 
 def walk_forward_optimization(
     strategy_cls: Type[BaseStrategy],
@@ -70,12 +59,6 @@ def walk_forward_optimization(
     metric: str = 'sharpe_ratio',
     indicator_warmup: int = 120,
 ) -> dict:
-    """Walk-forward optimization with indicator warm-up.
-
-    Each OOS fold is prepended with ``indicator_warmup`` bars from the
-    training set so that rolling indicators (SMA-100, ATR-14, etc.)
-    produce valid values from the first true OOS bar.
-    """
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
@@ -93,7 +76,6 @@ def walk_forward_optimization(
             continue
 
         train_data = range_bars.iloc[fold_start:train_end].copy()
-
         warmup_start = max(fold_start, train_end - indicator_warmup)
         test_data_with_warmup = range_bars.iloc[warmup_start:fold_end].copy()
 
@@ -120,17 +102,12 @@ def walk_forward_optimization(
 
     return {'oos_results': oos_results, 'best_params_per_fold': best_params_per_fold}
 
-
 def monte_carlo_simulation(
     trades_history: list,
     initial_capital: float,
     n_simulations: int = 1000,
     confidence_levels: tuple = (0.05, 0.25, 0.50, 0.75, 0.95),
 ) -> dict:
-    """Bootstrap Monte Carlo — reshuffle trade PnLs to estimate terminal equity distribution.
-
-    Returns terminal_equity_percentiles, max_drawdown_percentiles, ruin_probability.
-    """
     if not trades_history:
         return {
             'terminal_equity_percentiles': {},

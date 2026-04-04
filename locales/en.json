@@ -45,6 +45,7 @@
     "strategy_vwap_bounce": "VWAP Bounce + Volume",
     "strategy_mtf_momentum": "Multi-Timeframe Momentum",
     "strategy_ml_reversion": "ML Reversion Bounce (XGBoost)",
+    "strategy_arabian_volume": "Arabian Volume Scalper (Weis Wave)",
     "col_symbol": "Symbol",
     "col_price": "Price",
     "col_vwap": "VWAP",

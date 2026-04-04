@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from .strategies import BaseStrategy
+from .strategies.base import BaseStrategy
 
 
 def run_advanced_backtest(
@@ -133,7 +133,7 @@ def run_advanced_backtest(
                 actual_exit = closes[i] - exit_slip
 
             trade_pnl_raw = ((actual_exit - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
-            
+
             if contract_size == 100000:
                 nominal_lot_value = contract_size
             else:
@@ -141,7 +141,7 @@ def run_advanced_backtest(
 
             lots_traded = position_size_usd / (nominal_lot_value + 1e-8)
             commission_cost = lots_traded * 6.0 * 2
-            
+
             trade_pnl = trade_pnl_raw - commission_cost
             current_equity += (trade_pnl - pnl)
 

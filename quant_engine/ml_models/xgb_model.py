@@ -1,16 +1,17 @@
-"""XGBoost ML models — walk-forward training, MFE target labeling, feature importance."""
+"""XGBoost model and Walk-Forward caching engine."""
 
 import os
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+import lightgbm as lgb
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score
 import logging
 from numpy.lib.stride_tricks import sliding_window_view
 from joblib import Memory
 
-from .indicators import (
+from ..indicators import (
     calculate_rsi, calculate_atr, calculate_bollinger,
     calculate_adx, calculate_orderflow_proxy, calculate_return_autocorrelation,
 )
@@ -21,73 +22,41 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-cache_dir = os.path.join(os.path.dirname(__file__), '..', '.cache')
+cache_dir = os.path.join(os.path.dirname(__file__), '..', '..', '.cache')
 os.makedirs(cache_dir, exist_ok=True)
 memory = Memory(cache_dir, verbose=0)
-
-
-class StatArbMLFilter:
-    """ML-enhanced pair-trading filter for spread reversion probability."""
-
-    def __init__(self):
-        self.model = xgb.XGBClassifier(
-            n_estimators=XGB_N_ESTIMATORS, max_depth=XGB_MAX_DEPTH,
-            learning_rate=XGB_LEARNING_RATE,
-            objective='binary:logistic', random_state=42,
-        )
-        self.is_trained = False
-
-    def prepare_features(self, spread: pd.Series, z_score: pd.Series, window: int = 10) -> pd.DataFrame:
-        """Build feature matrix for spread reversion classification."""
-        df = pd.DataFrame()
-        df['Z_Score'] = z_score
-        df['Spread_Momentum_3'] = spread.diff(3)
-        df['Spread_Volatility_10'] = spread.rolling(window=10).std()
-        future_spread_change = spread.shift(-window) - spread
-        is_reverting = np.where(
-            (z_score > 1.5) & (future_spread_change < 0), 1,
-            np.where((z_score < -1.5) & (future_spread_change > 0), 1, 0),
-        )
-        df['Target'] = is_reverting
-        return df.dropna()
-
-    def train(self, df_features: pd.DataFrame):
-        """Train on 80% chronological split."""
-        X = df_features.drop('Target', axis=1)
-        y = df_features['Target']
-        split_idx = int(len(X) * 0.8)
-        if split_idx < 10:
-            return
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-        self.model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-        self.is_trained = True
-
-    def predict_probability(self, latest_features: pd.DataFrame) -> float:
-        """Return P(reversion) for the latest observation."""
-        if not self.is_trained:
-            return 0.5
-        return self.model.predict_proba(latest_features)[0][1]
 
 
 @memory.cache
 def _cached_walk_forward_train(
     df_index, df_values, df_columns, initial_train_frac,
     n_estimators, max_depth, learning_rate,
-    horizon, refit_every, tp_mult, sl_mult, feature_cols
+    horizon, refit_every, tp_mult, sl_mult, feature_cols,
+    model_type='xgboost'
 ):
-    """Core walk-forward logic, extracted for joblib caching.
-    Reconstructs DataFrame from primitive arrays to avoid hashing overhead/issues.
-    """
+    """Core walk-forward logic, extracted for joblib caching."""
     df = pd.DataFrame(df_values, index=df_index, columns=df_columns)
-    
-    model = xgb.XGBClassifier(
-        n_estimators=n_estimators, max_depth=max_depth,
-        learning_rate=learning_rate,
-        objective='binary:logistic', random_state=42,
-        subsample=0.8, colsample_bytree=0.8
-    )
-    
+
+    df = df.infer_objects()
+    for col in df.columns:
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except (ValueError, TypeError):
+            pass
+
+    if model_type == 'lightgbm':
+        model = lgb.LGBMClassifier(
+            num_leaves=31, max_depth=-1, learning_rate=learning_rate,
+            n_estimators=n_estimators, objective='binary', random_state=42,
+            subsample=0.8, colsample_bytree=0.8, n_jobs=-1, verbose=-1
+        )
+    else:
+        model = xgb.XGBClassifier(
+            n_estimators=n_estimators, max_depth=max_depth,
+            learning_rate=learning_rate, objective='binary:logistic', random_state=42,
+            subsample=0.8, colsample_bytree=0.8
+        )
+
     dummy_instance = XGBoostRangeBarModel(tp_mult=tp_mult, sl_mult=sl_mult)
     data = dummy_instance.build_features(df)
     data['Target'] = dummy_instance._build_mfe_target(data)
@@ -111,14 +80,14 @@ def _cached_walk_forward_train(
         if train_end_purged > 0:
             X_train_sub = X_all[:train_end_purged]
             y_train_sub = y_all[:train_end_purged]
-            model.fit(X_train_sub, y_train_sub, verbose=False)
+            model.fit(X_train_sub, y_train_sub)
             predictions[cursor:segment_end] = model.predict_proba(X_all[cursor:segment_end])[:, 1]
 
         cursor = segment_end
 
     data['WF_Prediction'] = predictions
     feature_importances = dict(zip(feature_cols, model.feature_importances_))
-    
+
     tscv = TimeSeriesSplit(n_splits=5)
     cv_scores = []
     X_train_init = X_all[:initial_train_end]
@@ -126,21 +95,14 @@ def _cached_walk_forward_train(
     for train_idx, val_idx in tscv.split(X_train_init):
         if len(train_idx) < 20:
             continue
-        model.fit(X_train_init[train_idx], y_train_init[train_idx], verbose=False)
+        model.fit(X_train_init[train_idx], y_train_init[train_idx])
         cv_scores.append(accuracy_score(y_train_init[val_idx], model.predict(X_train_init[val_idx])))
 
     return data, model, feature_importances, cv_scores
 
+
 class XGBoostRangeBarModel:
-    """Walk-forward XGBoost classifier for range-bar price direction.
-
-    Uses MFE-based target labeling: a bar is labeled 1 (bullish setup)
-    if, within the next ``horizon`` bars, the price reaches +``tp_mult``
-    range-bar-sizes BEFORE hitting -``sl_mult`` range-bar-sizes.
-
-    Features: RSI, ATR, Bollinger %B/Width, ADX, volume delta,
-    return autocorrelation, directional momentum.
-    """
+    """Walk-forward XGBoost classifier for range-bar price direction."""
 
     FEATURE_COLS = [
         'Dir_Sum_5', 'Vol_Ratio', 'Close_Diff', 'Variance_Ratio',
@@ -188,10 +150,7 @@ class XGBoostRangeBarModel:
         return data
 
     def _build_mfe_target(self, data: pd.DataFrame) -> np.ndarray:
-        """MFE-based target: 1 if TP hit before SL within horizon, else 0.
-
-        Optimized vectorized implementation O(1) via sliding_window_view.
-        """
+        """MFE-based target: 1 if TP hit before SL within horizon, else 0."""
         closes = data['Close'].values
         highs = data['High'].values
         lows = data['Low'].values
@@ -225,20 +184,19 @@ class XGBoostRangeBarModel:
 
         return target
 
-
-
     def train(self, df: pd.DataFrame, initial_train_frac: float = 0.70):
         """Expanding-window walk-forward training. Caches via joblib."""
         data, model, fi, cv_scores = _cached_walk_forward_train(
             df.index, df.values, df.columns, initial_train_frac,
             self.model.n_estimators, self.model.max_depth, self.model.learning_rate,
-            self.horizon_param, self.refit_param, self.tp_mult, self.sl_mult, self.FEATURE_COLS
+            self.horizon_param, self.refit_param, self.tp_mult, self.sl_mult, self.FEATURE_COLS,
+            model_type='xgboost'
         )
-        
+
         if data is None:
             return None
-            
-        self.is_cached = True 
+
+        self.is_cached = True
         self.model = model
         self.feature_importances_ = fi
         self.cv_scores_ = cv_scores
@@ -252,11 +210,9 @@ class XGBoostRangeBarModel:
         for train_idx, val_idx in tscv.split(X):
             if len(train_idx) < 20:
                 continue
-            self.model.fit(X[train_idx], y[train_idx], verbose=False)
+            self.model.fit(X[train_idx], y[train_idx])
             scores.append(accuracy_score(y[val_idx], self.model.predict(X[val_idx])))
         self.cv_scores_ = scores
-
-
 
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
         """Return bullish probability for each row."""
@@ -276,11 +232,7 @@ class XGBoostRangeBarModel:
         return dict(sorted(self.feature_importances_.items(), key=lambda x: x[1], reverse=True))
 
     def plot_feature_importance(self, save_path: str | None = None):
-        """Render horizontal bar chart of feature importances via matplotlib.
-
-        Returns the matplotlib Figure object. If ``save_path`` is given,
-        the chart is also saved to disk (PNG).
-        """
+        """Render horizontal bar chart of feature importances via matplotlib."""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
@@ -304,7 +256,7 @@ class XGBoostRangeBarModel:
                     f'{p:.1f}%', va='center', fontsize=9, color='#333')
 
         ax.set_xlabel('Relative Importance (%)', fontsize=11)
-        ax.set_title('XGBoost Feature Importance (Walk-Forward)', fontsize=13, fontweight='bold')
+        ax.set_title('Feature Importance (Walk-Forward)', fontsize=13, fontweight='bold')
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.grid(axis='x', alpha=0.3)
