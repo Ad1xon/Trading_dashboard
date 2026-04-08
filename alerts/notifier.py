@@ -1,6 +1,4 @@
-"""
-Discord notifier with rate limiting, rich embeds, and alert history.
-"""
+"""Discord notifier with rate limiting, rich embeds, and alert history."""
 
 import time
 import logging
@@ -13,12 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordNotifier:
-    """Send formatted embed alerts to a Discord webhook with rate limiting.
-
-    Alerts are dispatched on daemon threads so the calling code is
-    never blocked by network latency. A sliding-window rate limiter
-    prevents Discord API abuse.
-    """
+    """Send formatted embed alerts to a Discord webhook with rate limiting."""
 
     def __init__(self, webhook_url: str, rate_limit_per_minute: int = 10):
         self.webhook_url = webhook_url
@@ -33,11 +26,7 @@ class DiscordNotifier:
         signal_type: str = "INFO",
         confidence: float | None = None,
     ) -> bool:
-        """Send a formatted embed alert via Discord webhook.
-
-        Returns ``True`` if the dispatch thread was started
-        successfully (does not guarantee delivery).
-        """
+        """Send a formatted embed alert via Discord webhook."""
         if not self.webhook_url:
             return False
 

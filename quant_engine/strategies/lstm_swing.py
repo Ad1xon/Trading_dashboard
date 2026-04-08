@@ -1,9 +1,4 @@
-"""
-Deep-Learning swing strategy using LSTM neural network.
-
-Designed for longer time-horizons (H1 / H4 / D1 OHLCV data) rather
-than M1 range bars.
-"""
+"""Deep-Learning swing strategy using LSTM neural network."""
 
 import pandas as pd
 import numpy as np
@@ -13,13 +8,7 @@ from ..indicators import calculate_atr
 
 
 class LSTMSwingStrategy(BaseStrategy):
-    """Swing trading strategy driven by an LSTM neural network.
-
-    Requires raw OHLCV data at H1/H4/D1 resolution and at least two
-    years of history for statistically meaningful predictions.  The
-    LSTM outputs a bullish probability that is gated by a 200-bar
-    trend filter before producing a signal.
-    """
+    """Swing trading strategy driven by an LSTM neural network."""
 
     params = {
         'prob_threshold': (0.65, 0.50, 0.80, 0.05),

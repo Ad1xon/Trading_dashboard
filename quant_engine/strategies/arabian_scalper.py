@@ -1,9 +1,4 @@
-"""
-Arabian Volume Scalper with Risk Management (fixed 1:3 R:R).
-
-Combines momentum + volume surge detection with LightGBM probability
-gating, NLP sentiment, and macro-event blackout.
-"""
+"""Arabian Volume Scalper with Risk Management (fixed 1:3 R:R)."""
 
 import pandas as pd
 import numpy as np
@@ -14,12 +9,7 @@ from data_feed.nlp_engine import SentimentEngine
 
 
 class ArabianScalper(BaseStrategy):
-    """Arabian Scalper — momentum + volume surge with LGBM confirmation.
-
-    Uses a fixed risk-to-reward ratio (default 1:3) and caps the
-    maximum holding period at 50 bars.  NLP sentiment and macro-event
-    filtering are applied automatically.
-    """
+    """Arabian Scalper — momentum + volume surge with LGBM confirmation."""
 
     params = {
         'lookback': (10, 5, 20, 1),

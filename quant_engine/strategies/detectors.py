@@ -1,6 +1,4 @@
-"""
-Market-structure detectors — liquidity sweeps, statistical arbitrage setups.
-"""
+"""Market-structure detectors — liquidity sweeps, statistical arbitrage setups."""
 
 import pandas as pd
 from ..indicators import calculate_vwap_with_bands
@@ -9,15 +7,7 @@ from ..ml_models import StatArbMLFilter
 
 
 def detect_liquidity_sweep(df: pd.DataFrame) -> dict:
-    """Detect VWAP-band liquidity sweeps on the latest two bars.
-
-    A bullish sweep occurs when the previous bar wicked below the lower
-    VWAP band and the current bar closed back above it.  Vice-versa for
-    bearish sweeps.
-
-    Returns:
-        Dict with ``signal`` (bool), ``type`` (str or None), ``message``.
-    """
+    """Detect VWAP-band liquidity sweeps on the latest two bars."""
     df = calculate_vwap_with_bands(df)
     latest = df.iloc[-1]
     prev = df.iloc[-2]
@@ -41,14 +31,7 @@ def analyze_pair_opportunity(
     df_x: pd.DataFrame,
     ml_filter: StatArbMLFilter,
 ) -> dict:
-    """Evaluate a statistical-arbitrage pair setup.
-
-    Checks cointegration, then uses an ML filter to estimate the
-    probability of spread reversion at extreme Z-scores.
-
-    Returns:
-        Dict with ``signal`` (bool) and ``message``.
-    """
+    """Evaluate a statistical-arbitrage pair setup."""
     arb_data = test_cointegration(df_y['Close'], df_x['Close'])
     if not arb_data["is_cointegrated"]:
         return {"signal": False, "message": "Brak kointegracji statystycznej."}

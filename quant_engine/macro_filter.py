@@ -1,10 +1,4 @@
-"""
-Macroeconomic event filter for volatility blackout periods.
-
-Fetches high-impact events from the ForexFactory XML feed and
-zeroes out trading signals within a configurable window around
-each event.
-"""
+"""Macroeconomic event filter for volatility blackout periods."""
 
 import logging
 
@@ -19,25 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class MacroFilter:
-    """Manages trading blackouts around high-impact economic events.
-
-    On instantiation, fetches the current week's ForexFactory calendar
-    and stores timestamps of all "High" impact releases.
-    """
+    """Manages trading blackouts around high-impact economic events."""
 
     def __init__(self, blackout_minutes: int = MACRO_BLACKOUT_MINUTES):
         self.blackout_minutes = blackout_minutes
         self.high_impact_events = self._fetch_economic_calendar()
 
     def _fetch_economic_calendar(self) -> pd.DatetimeIndex:
-        """Fetch high-impact events from ForexFactory XML feed.
-
-        Parses the weekly calendar, filters for "High" impact, and
-        converts US/Eastern timestamps to tz-naive UTC.
-
-        Returns:
-            ``DatetimeIndex`` of event times (tz-naive UTC).
-        """
+        """Fetch high-impact events from ForexFactory XML feed."""
         url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
         events = []
         try:
@@ -78,11 +61,7 @@ class MacroFilter:
         return pd.DatetimeIndex(event_series)
 
     def apply_blackout_mask(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Vectorised nullification of signals during blackout windows.
-
-        Sets ``Signal`` to 0 for any bar falling within ± *blackout_minutes*
-        of a high-impact event.
-        """
+        """Vectorised nullification of signals during blackout windows."""
         df = df.copy()
         if 'Signal' not in df.columns or self.high_impact_events.empty:
             return df

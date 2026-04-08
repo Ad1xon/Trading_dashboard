@@ -1,25 +1,11 @@
-"""
-Technical indicators — RSI, ATR, VWAP, Bollinger, ADX, MACD,
-SuperTrend, Weis Wave Volume, session features, order-flow proxy.
-"""
+"""Technical indicators — RSI, ATR, VWAP, Bollinger, ADX, MACD, SuperTrend, Weis Wave Volume, session features, order-flow proxy."""
 
 import pandas as pd
 import numpy as np
 
 
 def calculate_vwap_with_bands(df: pd.DataFrame, window: int = 200) -> pd.DataFrame:
-    """Rolling anchored VWAP with ±2σ bands.
-
-    Uses a rolling window instead of cumulative sum to prevent the
-    indicator from flattening on multi-week datasets.
-
-    Args:
-        df:     DataFrame with ``High``, ``Low``, ``Close``, ``Volume``.
-        window: Rolling lookback for VWAP calculation.
-
-    Returns:
-        Copy of *df* with added ``VWAP``, ``VWAP_Upper_2``, ``VWAP_Lower_2``.
-    """
+    """Rolling anchored VWAP with ±2σ bands."""
     df = df.copy()
     df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
     df['VP'] = df['Typical_Price'] * df['Volume']
@@ -35,15 +21,7 @@ def calculate_vwap_with_bands(df: pd.DataFrame, window: int = 200) -> pd.DataFra
 
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """Relative Strength Index with Wilder smoothing.
-
-    Args:
-        series: Price series (typically Close).
-        period: RSI lookback period.
-
-    Returns:
-        Series of RSI values in the 0–100 range.
-    """
+    """Relative Strength Index with Wilder smoothing."""
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -54,17 +32,7 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
 
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Average True Range — absolute volatility measure.
-
-    Computed via Wilder EMA of True Range.
-
-    Args:
-        df:     DataFrame with ``High``, ``Low``, ``Close``.
-        period: Smoothing period.
-
-    Returns:
-        Series of ATR values.
-    """
+    """Average True Range — absolute volatility measure."""
     close_prev = df['Close'].shift(1)
     tr1 = df['High'] - df['Low']
     tr2 = (df['High'] - close_prev).abs()
@@ -78,17 +46,7 @@ def calculate_bollinger(
     period: int = 20,
     num_std: float = 2.0,
 ) -> dict:
-    """Bollinger Bands.
-
-    Args:
-        series:  Price series (typically Close).
-        period:  Moving-average lookback.
-        num_std: Band width in standard deviations.
-
-    Returns:
-        Dict with keys ``BB_Mid``, ``BB_Upper``, ``BB_Lower``,
-        ``BB_Width``, ``BB_PctB``.
-    """
+    """Bollinger Bands."""
     mid = series.rolling(window=period).mean()
     std = series.rolling(window=period).std()
     upper = mid + num_std * std
@@ -107,11 +65,7 @@ def calculate_macd(
     slow: int = 26,
     signal: int = 9,
 ) -> dict:
-    """Moving Average Convergence Divergence.
-
-    Returns:
-        Dict with keys ``MACD_Line``, ``MACD_Signal``, ``MACD_Hist``.
-    """
+    """Moving Average Convergence Divergence."""
     ema_fast = series.ewm(span=fast, adjust=False).mean()
     ema_slow = series.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
@@ -123,17 +77,7 @@ def calculate_macd(
 
 
 def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Average Directional Index — trend strength gauge.
-
-    Values above 25 indicate a trending market; below 20 a ranging one.
-
-    Args:
-        df:     DataFrame with ``High``, ``Low``, ``Close``.
-        period: Smoothing period for DI and ADX.
-
-    Returns:
-        Series of ADX values.
-    """
+    """Average Directional Index — trend strength gauge."""
     plus_dm = df['High'].diff()
     minus_dm = -df['Low'].diff()
     plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
@@ -147,12 +91,7 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def calculate_session_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add binary session columns (Asian / London / New York) based on UTC hour.
-
-    Returns:
-        Copy of *df* with ``Session_Asian``, ``Session_London``,
-        ``Session_NY`` columns (0 or 1).
-    """
+    """Add binary session columns (Asian / London / New York) based on UTC hour."""
     df = df.copy()
     hour = df.index.hour if hasattr(df.index, 'hour') else pd.Series(0, index=df.index)
     df['Session_Asian'] = ((hour >= 0) & (hour < 8)).astype(int)
@@ -162,10 +101,7 @@ def calculate_session_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calculate_orderflow_proxy(df: pd.DataFrame) -> pd.Series:
-    """Estimate directional volume delta from OHLCV bars.
-
-    Uses a Close-minus-Open heuristic normalised by bar range.
-    """
+    """Estimate directional volume delta from OHLCV bars."""
     bar_range = df['High'] - df['Low']
     close_open = df['Close'] - df['Open']
     return (close_open / (bar_range + 1e-10)) * df['Volume']
@@ -176,10 +112,7 @@ def calculate_return_autocorrelation(
     window: int = 20,
     lag: int = 1,
 ) -> pd.Series:
-    """Rolling autocorrelation of returns at the specified lag.
-
-    Useful for detecting mean-reversion or momentum regimes.
-    """
+    """Rolling autocorrelation of returns at the specified lag."""
     returns = series.pct_change()
     return returns.rolling(window=window).apply(
         lambda x: pd.Series(x).autocorr(lag=lag) if len(x) > lag else 0,
@@ -192,24 +125,7 @@ def calculate_supertrend(
     period: int = 10,
     multiplier: float = 3.0,
 ) -> pd.DataFrame:
-    """Classic SuperTrend indicator.
-
-    Convention:
-        ``SuperTrend_Trend =  1`` → uptrend  (price above lower band).
-        ``SuperTrend_Trend = -1`` → downtrend (price below upper band).
-
-    The bands ratchet: the lower band can only rise, the upper band
-    can only fall, until the trend flips.
-
-    Args:
-        df:         DataFrame with ``High``, ``Low``, ``Close``.
-        period:     ATR lookback.
-        multiplier: ATR multiplier for band width.
-
-    Returns:
-        DataFrame with ``SuperTrend_Upper``, ``SuperTrend_Lower``,
-        ``SuperTrend_Trend``.
-    """
+    """Classic SuperTrend indicator."""
     atr = calculate_atr(df, period)
     hl2 = (df['High'] + df['Low']) / 2.0
 
@@ -262,12 +178,7 @@ def calculate_supertrend(
 
 
 def calculate_weis_wave_volume(df: pd.DataFrame) -> pd.Series:
-    """Weis Wave Volume — cumulative directional volume within each wave.
-
-    A new wave starts whenever the bar direction (bullish / bearish)
-    changes.  Positive values represent buying waves, negative values
-    selling waves.
-    """
+    """Weis Wave Volume — cumulative directional volume within each wave."""
     dir_series = np.where(df['Close'] >= df['Open'], 1, -1)
     dir_series = pd.Series(dir_series, index=df.index)
     trend_shift = dir_series != dir_series.shift(1)

@@ -1,6 +1,4 @@
-"""
-Mean-reversion strategies — Z-Score, ML-Bounce, VWAP Bounce, MTF Momentum.
-"""
+"""Mean-reversion strategies — Z-Score, ML-Bounce, VWAP Bounce, MTF Momentum."""
 
 import pandas as pd
 import numpy as np
@@ -13,12 +11,7 @@ from ..ml_models import XGBoostRangeBarModel
 
 
 class ZScoreMeanReversion(BaseStrategy):
-    """Mean-reversion on Z-score extremes with RSI and ADX regime filter.
-
-    Enters when the Z-score exceeds a threshold *and* RSI confirms
-    oversold/overbought *and* ADX indicates a non-trending (ranging)
-    market.  Exits when the Z-score crosses zero.
-    """
+    """Mean-reversion on Z-score extremes with RSI and ADX regime filter."""
 
     params = {
         'z_window': (20, 10, 60, 5),
@@ -83,12 +76,7 @@ class ZScoreMeanReversion(BaseStrategy):
 
 
 class MLBounceReversion(BaseStrategy):
-    """Bollinger Band bounce with XGBoost directional-bias confirmation.
-
-    Trades against extreme momentum when the ML model's bullish
-    probability supports the reversal.  Designed for noisy, ranging
-    micro-structure periods.
-    """
+    """Bollinger Band bounce with XGBoost directional-bias confirmation."""
 
     params = {
         'bb_period': (20, 10, 40, 5),
@@ -169,11 +157,7 @@ class MLBounceReversion(BaseStrategy):
 
 
 class VWAPBounceStrategy(BaseStrategy):
-    """VWAP ±2σ band bounce with RSI and volume confirmation.
-
-    Enters when price touches VWAP bands, RSI confirms extremes,
-    and volume exceeds its rolling average.
-    """
+    """VWAP ±2σ band bounce with RSI and volume confirmation."""
 
     params = {
         'vol_mult': (1.5, 1.0, 3.0, 0.25),
@@ -235,12 +219,7 @@ class VWAPBounceStrategy(BaseStrategy):
 
 
 class MultiTimeframeMomentum(BaseStrategy):
-    """Trend on slow MA, entry on fast-RSI pullback.
-
-    Uses a slow moving average for direction and a short-period RSI
-    for entry timing (buy dips in uptrends, sell rallies in downtrends).
-    Exit via ATR-based Chandelier trailing stop.
-    """
+    """Trend on slow MA, entry on fast-RSI pullback."""
 
     params = {
         'slow_ma': (100, 50, 200, 25),

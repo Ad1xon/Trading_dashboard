@@ -1,7 +1,4 @@
-"""
-WebSocket engine — volume-bar aggregation with callback system
-and multi-symbol support via MT5 tick streaming.
-"""
+"""WebSocket engine — volume-bar aggregation with callback system and multi-symbol support via MT5 tick streaming."""
 
 import asyncio
 import time
@@ -13,15 +10,7 @@ import MetaTrader5 as mt5
 
 
 class VolumeBarAggregator:
-    """Aggregate tick data into volume bars and fire callbacks on completion.
-
-    Maintains a rolling NumPy ring-buffer of completed bars for
-    low-latency historical access.
-
-    Args:
-        volume_threshold: Cumulative volume required to close a bar.
-        symbol:           Instrument identifier attached to bar dicts.
-    """
+    """Aggregate tick data into volume bars and fire callbacks on completion."""
 
     def __init__(self, volume_threshold: float, symbol: str = "UNKNOWN"):
         self.volume_threshold = volume_threshold
@@ -42,10 +31,7 @@ class VolumeBarAggregator:
         self._callbacks: list[Callable] = []
 
     def on_bar_complete(self, callback: Callable):
-        """Register a callback invoked when a volume bar completes.
-
-        Signature: ``callback(bar_data: dict, symbol: str)``.
-        """
+        """Register a callback invoked when a volume bar completes."""
         self._callbacks.append(callback)
 
     def process_tick(
@@ -54,15 +40,7 @@ class VolumeBarAggregator:
         volume: float,
         timestamp: int,
     ) -> dict | None:
-        """Process a single tick.
-
-        Accumulates volume and updates the running bar.  When the
-        threshold is reached, the bar is finalised, stored in the ring
-        buffer, and all registered callbacks are fired.
-
-        Returns:
-            Completed bar dict or ``None`` if the bar is still open.
-        """
+        """Process a single tick."""
         if self.is_new_bar:
             self.bar_open = price
             self.bar_high = price
@@ -112,11 +90,7 @@ async def mt5_trade_stream(
     volume_threshold: float,
     on_bar: Callable | None = None,
 ):
-    """Stream ticks from MT5 and aggregate into volume bars.
-
-    Polls ``mt5.copy_ticks_from`` every second, feeding each new tick
-    into a ``VolumeBarAggregator``.
-    """
+    """Stream ticks from MT5 and aggregate into volume bars."""
     if not mt5.initialize():
         return
 

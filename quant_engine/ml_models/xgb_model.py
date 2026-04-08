@@ -1,10 +1,4 @@
-"""
-XGBoost walk-forward classifier and shared caching engine.
-
-Provides ``XGBoostRangeBarModel`` for direction prediction on OHLCV /
-range-bar data, plus a ``@memory.cache``-decorated training function
-reusable by LightGBM and other tree-based models.
-"""
+"""XGBoost walk-forward classifier and shared caching engine."""
 
 import os
 import warnings
@@ -51,19 +45,7 @@ def _cached_walk_forward_train(
     feature_cols,
     model_type='xgboost',
 ):
-    """Core expanding-window walk-forward logic, extracted for joblib caching.
-
-    Trains a tree model on an expanding window, stepping forward by
-    ``refit_every`` bars, and records out-of-sample predictions for the
-    entire dataset.  A purge gap of ``horizon`` bars is inserted between
-    the training boundary and the first predicted bar to prevent
-    look-ahead contamination.
-
-    Returns:
-        Tuple of ``(data_with_predictions, fitted_model,
-        feature_importances_dict, cv_accuracy_scores)``.
-        ``(None, None, {}, [])`` when data is insufficient.
-    """
+    """Core expanding-window walk-forward logic, extracted for joblib caching."""
     df = pd.DataFrame(df_values, index=df_index, columns=df_columns)
 
     df = df.infer_objects()
@@ -144,12 +126,7 @@ def _cached_walk_forward_train(
 
 
 class XGBoostRangeBarModel:
-    """Walk-forward XGBoost classifier for price-direction prediction.
-
-    Produces a ``Bull_Prob`` (bullish probability) for each bar via an
-    expanding-window walk-forward scheme.  Results are cached to disk so
-    that repeated runs with identical data are instantaneous.
-    """
+    """Walk-forward XGBoost classifier for price-direction prediction."""
 
     FEATURE_COLS = [
         'Dir_Sum_5', 'Vol_Ratio', 'Close_Diff', 'Variance_Ratio',
@@ -180,12 +157,7 @@ class XGBoostRangeBarModel:
         self.cv_scores_: list = []
 
     def build_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Construct the full feature matrix from OHLCV data.
-
-        Engineered features include directional momentum, volume ratios,
-        variance ratio, RSI, ATR, Bollinger %B / width, ADX, order-flow
-        proxy, return autocorrelation, and sentiment score.
-        """
+        """Construct the full feature matrix from OHLCV data."""
         data = df.copy()
         data['Dir'] = np.where(data['Close'] > data['Open'], 1, -1)
         data['Dir_Sum_5'] = data['Dir'].rolling(5).sum()
@@ -211,10 +183,7 @@ class XGBoostRangeBarModel:
         return data
 
     def _build_mfe_target(self, data: pd.DataFrame) -> np.ndarray:
-        """MFE-based binary target: 1 if TP hit before SL within horizon, else 0.
-
-        Uses vectorised sliding-window comparison for speed.
-        """
+        """MFE-based binary target: 1 if TP hit before SL within horizon, else 0."""
         closes = data['Close'].values
         highs = data['High'].values
         lows = data['Low'].values
@@ -270,11 +239,7 @@ class XGBoostRangeBarModel:
         return data
 
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
-        """Return bullish probability for each row.
-
-        If walk-forward predictions are already present in the DataFrame,
-        returns those directly to avoid redundant inference.
-        """
+        """Return bullish probability for each row."""
         if 'WF_Prediction' in df_features.columns:
             return df_features['WF_Prediction'].fillna(0.5).values
         if not self.is_trained:
@@ -300,14 +265,7 @@ class XGBoostRangeBarModel:
         )
 
     def plot_feature_importance(self, save_path: str | None = None):
-        """Render horizontal bar chart of feature importances via matplotlib.
-
-        Args:
-            save_path: Optional file path to save the figure.
-
-        Returns:
-            Matplotlib ``Figure`` or ``None`` if no importances available.
-        """
+        """Render horizontal bar chart of feature importances via matplotlib."""
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt

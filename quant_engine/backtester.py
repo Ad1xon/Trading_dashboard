@@ -1,7 +1,4 @@
-"""
-Advanced backtester — bar-by-bar simulation with SL/TP, MFE trailing,
-lot cap, margin-call circuit breaker, and comprehensive metrics.
-"""
+"""Advanced backtester with market realism (costs, slippage, spread, delay, fill probability)."""
 
 import pandas as pd
 import numpy as np
@@ -17,34 +14,12 @@ def run_advanced_backtest(
     commission_pct: float,
     symbol: str = "EURUSD",
 ) -> dict:
-    """Run an event-driven backtest on OHLCV or range-bar data.
-
-    PnL is tracked exclusively via bar-by-bar equity updates (no
-    double-counting).  Supports ATR-based SL/TP, MFE trailing stops,
-    and a configurable max-holding period from strategy columns.
-
-    Safety mechanisms:
-        * **Lot cap** — position size is capped at ``MAX_ALLOWED_LOTS``
-          to prevent absurd leverage when equity grows large.
-        * **Margin-call circuit breaker** — if equity drops to zero or
-          below, the simulation halts immediately (account bankruptcy).
-
-    Args:
-        trading_data:    DataFrame with OHLCV columns (range bars *or*
-                         time-based bars).
-        initial_capital: Starting account equity in USD.
-        risk_percent:    Fraction of equity risked per trade (e.g. 0.02).
-        slippage:        Per-trade slippage in price units.
-        strategy:        ``BaseStrategy`` subclass instance.
-        commission_pct:  Commission expressed as fraction of contract.
-        symbol:          Instrument name (used for contract-size lookup).
-
-    Returns:
-        Dict with performance metrics, equity curve, and trade log.
-    """
+    """Run an event-driven backtest on OHLCV or range-bar data."""
     from config import (
         MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT,
         CONTRACT_SIZES, MAX_ALLOWED_LOTS,
+        TRANSACTION_COST_BPS, SLIPPAGE_PCT, AVERAGE_SPREAD_PIPS,
+        EXECUTION_DELAY_BARS, ORDER_FILL_PROB,
     )
 
     df = trading_data.copy()
@@ -175,6 +150,9 @@ def run_advanced_backtest(
                 (actual_exit - entry_price) / (entry_price + 1e-8)
             ) * position_size_usd * current_position
 
+
+            transaction_cost = trade_pnl_raw * (TRANSACTION_COST_BPS / 10_000)
+
             if contract_size == 100_000:
                 nominal_lot_value = contract_size
             else:
@@ -183,7 +161,7 @@ def run_advanced_backtest(
             lots_traded = position_size_usd / (nominal_lot_value + 1e-8)
             commission_cost = lots_traded * 6.0 * 2
 
-            trade_pnl = trade_pnl_raw - commission_cost
+            trade_pnl = trade_pnl_raw - commission_cost - transaction_cost
             current_equity += (trade_pnl - pnl)
 
             if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl:
@@ -213,27 +191,32 @@ def run_advanced_backtest(
             dynamic_sl = np.nan
 
         if current_position == 0 and sig != 0:
-            entry_idx = i
-            real_slippage = slippage if sig == 1 else -slippage
-            entry_price = closes[i] + real_slippage
-            vol = stds[i] if not np.isnan(stds[i]) and stds[i] > 0 else (closes[i] * 0.001)
-            risk_amt = current_equity * risk_percent
-            calculated_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
 
-            if contract_size == 100_000:
-                nominal_lot_value = contract_size
-            else:
-                nominal_lot_value = contract_size * entry_price
+            if i + EXECUTION_DELAY_BARS < n:
+                entry_idx = i + EXECUTION_DELAY_BARS
+                real_slippage = SLIPPAGE_PCT * closes[i] if sig == 1 else -SLIPPAGE_PCT * closes[i]
 
-            calculated_lots = calculated_usd / (nominal_lot_value + 1e-8)
-            capped_lots = min(calculated_lots, MAX_ALLOWED_LOTS)
-            position_size_usd = capped_lots * nominal_lot_value
+                spread_price = AVERAGE_SPREAD_PIPS * 0.0001 * closes[i]
+                entry_price = closes[i] + real_slippage + (spread_price if sig == 1 else -spread_price)
+                vol = stds[i] if not np.isnan(stds[i]) and stds[i] > 0 else (closes[i] * 0.001)
+                risk_amt = current_equity * risk_percent
+                calculated_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
 
-            current_position = sig
-            bars_held = 0
-            high_since_entry = highs[i]
-            low_since_entry = lows[i]
-            dynamic_sl = np.nan
+                if contract_size == 100_000:
+                    nominal_lot_value = contract_size
+                else:
+                    nominal_lot_value = contract_size * entry_price
+
+                calculated_lots = calculated_usd / (nominal_lot_value + 1e-8)
+                capped_lots = min(calculated_lots, MAX_ALLOWED_LOTS)
+
+                position_size_usd = capped_lots * nominal_lot_value * ORDER_FILL_PROB
+
+                current_position = sig
+                bars_held = 0
+                high_since_entry = highs[entry_idx]
+                low_since_entry = lows[entry_idx]
+                dynamic_sl = np.nan
 
         equity_curve[i] = current_equity
 
@@ -267,11 +250,7 @@ def _compute_metrics(
     initial_capital: float,
     trades: list,
 ) -> dict:
-    """Compute risk-adjusted performance metrics.
-
-    Includes Sharpe, Sortino, Calmar, Win Rate, Profit Factor,
-    max consecutive losses, and annualised return.
-    """
+    """Compute risk-adjusted performance metrics."""
     total_return = (equity_curve[-1] / initial_capital) - 1 if equity_curve[-1] > 0 else -1.0
 
     eq_series = pd.Series(equity_curve)

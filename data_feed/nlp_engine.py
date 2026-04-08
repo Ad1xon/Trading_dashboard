@@ -1,9 +1,4 @@
-"""
-NLP Sentiment Engine — FinBERT-based financial news analysis.
-
-Provides a singleton ``SentimentEngine`` that lazily loads the
-ProsusAI/finbert transformer model and caches per-query results.
-"""
+"""NLP Sentiment Engine — FinBERT-based financial news analysis."""
 
 import logging
 
@@ -15,12 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class SentimentEngine:
-    """Singleton FinBERT sentiment analyser with lazy model loading.
-
-    On first sentiment request the HuggingFace pipeline is downloaded
-    and cached.  Subsequent instances share the same model and query
-    cache.
-    """
+    """Singleton FinBERT sentiment analyser with lazy model loading."""
 
     _instance = None
 
@@ -50,12 +40,7 @@ class SentimentEngine:
                 self.nlp_pipeline = False
 
     def fetch_rss_sentiment(self, query: str) -> float:
-        """Fetch Google News RSS for *query* and return aggregated sentiment.
-
-        Scores range from -1.0 (strongly bearish) to +1.0 (strongly
-        bullish).  Results are cached per query for the lifetime of the
-        singleton.
-        """
+        """Fetch Google News RSS for *query* and return aggregated sentiment."""
         if query in self._cache:
             return self._cache[query]
 
@@ -95,10 +80,7 @@ class SentimentEngine:
         df: pd.DataFrame,
         symbol: str,
     ) -> pd.DataFrame:
-        """Apply the current sentiment score to the last bar of *df*.
-
-        Creates the ``Sentiment_Score`` column if it doesn't exist.
-        """
+        """Apply the current sentiment score to the last bar of *df*."""
         df = df.copy()
         if 'Sentiment_Score' not in df.columns:
             df['Sentiment_Score'] = 0.0

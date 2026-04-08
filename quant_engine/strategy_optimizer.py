@@ -1,7 +1,4 @@
-"""
-Strategy optimiser — grid search, walk-forward optimisation,
-and Monte Carlo simulation.
-"""
+"""Strategy optimiser — grid search, walk-forward optimisation, and Monte Carlo simulation."""
 
 import itertools
 from typing import Type
@@ -24,25 +21,7 @@ def grid_search(
     metric: str = 'sharpe_ratio',
     top_n: int = 10,
 ) -> list[dict]:
-    """Exhaustive parameter grid search ranked by a target metric.
-
-    Args:
-        strategy_cls:   Strategy class to instantiate.
-        trading_data:   OHLCV or range-bar DataFrame.
-        initial_capital: Starting equity.
-        risk_percent:   Fraction risked per trade.
-        slippage:       Slippage in price units.
-        commission_pct: Commission as a fraction.
-        param_grid:     ``{param_name: [values]}`` or ``None`` for
-                        auto-generated ranges from the strategy's
-                        ``params`` class attribute.
-        metric:         Key from the backtest results dict to optimise.
-        top_n:          Number of best results to return.
-
-    Returns:
-        Sorted list of result dicts (best first), each containing
-        ``params`` and all scalar backtest metrics.
-    """
+    """Exhaustive parameter grid search ranked by a target metric."""
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
@@ -72,10 +51,7 @@ def grid_search(
 
 
 def _auto_grid(strategy_cls: Type[BaseStrategy]) -> dict:
-    """Generate a parameter grid from the strategy's ``params`` class attribute.
-
-    Each param tuple is ``(default, lo, hi, step)``.
-    """
+    """Generate a parameter grid from the strategy's ``params`` class attribute."""
     grid = {}
     for name, (default, lo, hi, step) in strategy_cls.params.items():
         if isinstance(default, int):
@@ -98,17 +74,7 @@ def walk_forward_optimization(
     metric: str = 'sharpe_ratio',
     indicator_warmup: int = 120,
 ) -> dict:
-    """Walk-forward optimisation with in-sample optimisation and
-    out-of-sample validation on each fold.
-
-    Each fold optimises params on the training slice and evaluates
-    them on the test slice.  An indicator warm-up overlap is included
-    so that the first test bars have fully computed indicators.
-
-    Returns:
-        Dict with ``oos_results`` (list of per-fold metrics) and
-        ``best_params_per_fold``.
-    """
+    """Walk-forward optimisation with in-sample optimisation and     out-of-sample validation on each fold."""
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
@@ -165,16 +131,7 @@ def monte_carlo_simulation(
     n_simulations: int = 1000,
     confidence_levels: tuple = (0.05, 0.25, 0.50, 0.75, 0.95),
 ) -> dict:
-    """Bootstrap Monte Carlo simulation of trade-sequence risk.
-
-    Randomly resamples the trade PnL sequence ``n_simulations`` times
-    and computes terminal equity / max drawdown percentiles plus the
-    probability of ruin (equity reaching zero).
-
-    Returns:
-        Dict with ``terminal_equity_percentiles``,
-        ``max_drawdown_percentiles``, ``ruin_probability``.
-    """
+    """Bootstrap Monte Carlo simulation of trade-sequence risk."""
     if not trades_history:
         return {
             'terminal_equity_percentiles': {},

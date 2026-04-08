@@ -1,6 +1,4 @@
-"""
-Dashboard views — scanner, backtester, alert center, macro & sentiment.
-"""
+"""Dashboard views — scanner, backtester, alert center, macro & sentiment."""
 
 import streamlit as st
 import plotly.graph_objects as go

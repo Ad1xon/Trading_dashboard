@@ -1,11 +1,4 @@
-"""
-LightGBM model — leaf-wise gradient boosting variant for scalping signals.
-
-Inherits feature engineering, walk-forward logic, and caching from
-``XGBoostRangeBarModel``.  Overrides only the model object and the
-``train`` dispatch to route through the shared cache with
-``model_type='lightgbm'``.
-"""
+"""LightGBM model — leaf-wise gradient boosting variant for scalping signals."""
 
 import pandas as pd
 import lightgbm as lgb
@@ -15,12 +8,7 @@ from config import XGB_N_ESTIMATORS, XGB_LEARNING_RATE, XGB_TP_MULT, XGB_SL_MULT
 
 
 class LGBMRangeBarModel(XGBoostRangeBarModel):
-    """LightGBM classifier for scalping-oriented direction prediction.
-
-    Uses leaf-wise tree growth for speed on noisy bar data.
-    All feature engineering and MFE target construction are inherited;
-    only the underlying estimator differs.
-    """
+    """LightGBM classifier for scalping-oriented direction prediction."""
 
     def __init__(
         self,
@@ -42,11 +30,7 @@ class LGBMRangeBarModel(XGBoostRangeBarModel):
         )
 
     def train(self, df: pd.DataFrame, initial_train_frac: float = 0.70):
-        """Expanding-window walk-forward training via LightGBM.
-
-        Delegates to the shared ``_cached_walk_forward_train`` with
-        ``model_type='lightgbm'``.
-        """
+        """Expanding-window walk-forward training via LightGBM."""
         data, model, fi, cv_scores = _cached_walk_forward_train(
             df.index, df.values, df.columns, initial_train_frac,
             self.model.n_estimators, -1, self.model.learning_rate,

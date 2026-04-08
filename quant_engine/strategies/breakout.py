@@ -1,6 +1,4 @@
-"""
-Breakout strategies — SMC-style and XGBoost-enhanced.
-"""
+"""Breakout strategies — SMC-style and XGBoost-enhanced."""
 
 import pandas as pd
 import numpy as np
@@ -10,12 +8,7 @@ from ..ml_models import XGBoostRangeBarModel
 
 
 class VolatilityBreakout(BaseStrategy):
-    """Breakout above rolling high/low with volume, trend, and ATR confirmation.
-
-    Entry: price breaks the N-bar high/low *and* volume exceeds its
-    rolling average *and* ATR is expanding *and* the macro trend agrees.
-    Exit: Chandelier-style trailing stop based on ATR.
-    """
+    """Breakout above rolling high/low with volume, trend, and ATR confirmation."""
 
     params = {
         'lookback': (20, 10, 40, 5),
@@ -81,12 +74,7 @@ class VolatilityBreakout(BaseStrategy):
 
 
 class MLVolatilityBreakout(BaseStrategy):
-    """ML-enhanced breakout — walk-forward XGBoost probability filter.
-
-    Adds a bullish/bearish probability gate on top of the structural
-    breakout condition.  Only fires when the ML model agrees with the
-    price-action signal above/below a configurable threshold.
-    """
+    """ML-enhanced breakout — walk-forward XGBoost probability filter."""
 
     params = {
         'lookback': (20, 10, 40, 5),

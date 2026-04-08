@@ -1,9 +1,4 @@
-"""
-PyTorch LSTM model for sequential deep-learning swing predictions.
-
-Walk-forward training: scaler is fit only on the training portion and
-applied (transform-only) to the test portion to prevent data leakage.
-"""
+"""PyTorch LSTM model for sequential deep-learning swing predictions."""
 
 import logging
 
@@ -38,16 +33,7 @@ class PyTorchLSTM(nn.Module):
 
 
 class LSTMSwingModel:
-    """Wrapper integrating PyTorch LSTM into the quant-engine workflow.
-
-    Key design decisions:
-        * ``StandardScaler`` is fit **only** on the training split to
-          avoid look-ahead bias that would inflate backtest performance.
-        * A simple train/test split with a purge gap replaces the naïve
-          fit-on-everything approach.
-        * ``Std`` column is added in ``build_features`` so the backtester
-          always has access to a volatility proxy for position sizing.
-    """
+    """Wrapper integrating PyTorch LSTM into the quant-engine workflow."""
 
     FEATURE_COLS = [
         'Ret_1', 'Ret_5', 'Vol_Ratio', 'RSI_14', 'MACD_Hist', 'Z_Score',
@@ -62,12 +48,7 @@ class LSTMSwingModel:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def build_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Engineer stationary features required by the LSTM.
-
-        Raw prices are converted to returns and z-scores so the network
-        receives approximately stationary inputs.  A ``Std`` column is
-        added for downstream position-sizing in the backtester.
-        """
+        """Engineer stationary features required by the LSTM."""
         data = df.copy()
         data['Ret_1'] = data['Close'].pct_change()
         data['Ret_5'] = data['Close'].pct_change(5)
@@ -94,16 +75,7 @@ class LSTMSwingModel:
         return data
 
     def _create_sequences(self, data: np.ndarray, target: np.ndarray):
-        """Transform 2-D tabular data into 3-D sequential blocks for LSTM.
-
-        Args:
-            data:   Scaled feature matrix ``(n_samples, n_features)``.
-            target: Binary target array of length ``n_samples``.
-
-        Returns:
-            Tuple of ``(X_tensor, y_tensor)`` where X has shape
-            ``(n_sequences, seq_len, n_features)``.
-        """
+        """Transform 2-D tabular data into 3-D sequential blocks for LSTM."""
         X_seq = sliding_window_view(
             data, window_shape=(self.sequence_length, data.shape[1]),
         )
@@ -115,20 +87,7 @@ class LSTMSwingModel:
         )
 
     def train(self, df: pd.DataFrame):
-        """Train the LSTM with a proper train/test split.
-
-        The scaler is fit exclusively on the training portion to prevent
-        information from future bars leaking into the feature
-        normalisation.  A 10-bar purge gap separates the training and
-        test sets.
-
-        Args:
-            df: OHLCV DataFrame (ideally H1/H4/D1 for swing trading).
-
-        Returns:
-            *df* augmented with ``WF_Prediction`` column, or ``None``
-            when data is insufficient.
-        """
+        """Train the LSTM with a proper train/test split."""
         df_feat = self.build_features(df)
 
         horizon = 10
@@ -194,11 +153,7 @@ class LSTMSwingModel:
         return df
 
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
-        """Infer probabilities for new data.
-
-        Rows that cannot form a full sequence are filled with 0.5
-        (neutral probability).
-        """
+        """Infer probabilities for new data."""
         if not self.is_trained or len(df_features) < self.sequence_length:
             return np.full(len(df_features), 0.5)
 

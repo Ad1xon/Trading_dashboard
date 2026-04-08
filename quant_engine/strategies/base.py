@@ -1,6 +1,4 @@
-"""
-Base strategy definition — abstract interface for all trading strategies.
-"""
+"""Base strategy definition — abstract interface for all trading strategies."""
 
 import pandas as pd
 from abc import ABC, abstractmethod
@@ -9,12 +7,7 @@ from ..macro_filter import MacroFilter
 
 
 class BaseStrategy(ABC):
-    """Abstract base class for trading strategies.
-
-    All strategies expose a ``params`` dict for optimiser introspection.
-    The ``MacroFilter`` is initialised here so every subclass inherits
-    automatic signal blackout around high-impact macro events.
-    """
+    """Abstract base class for trading strategies."""
 
     params: dict = {}
 
@@ -23,8 +16,7 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Produce ``Signal``, ``SL_Price``, ``TP_Price``, ``Max_Hold``
-        columns on the input DataFrame."""
+        """Produce ``Signal``, ``SL_Price``, ``TP_Price``, ``Max_Hold``         columns on the input DataFrame."""
 
     def apply_macro_filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """Zero-out signals within ±N minutes of high-impact macro releases."""

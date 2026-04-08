@@ -1,6 +1,4 @@
-"""
-Range bar generator from M1 OHLCV data with large-candle splitting.
-"""
+"""Range bar generator from M1 OHLCV data with large-candle splitting."""
 
 import pandas as pd
 import numpy as np
@@ -10,19 +8,7 @@ def generate_synthetic_range_bars(
     df_1m: pd.DataFrame,
     range_size: float,
 ) -> pd.DataFrame:
-    """Convert minute-level OHLCV into fixed-size range bars.
-
-    Large M1 candles whose High–Low exceeds ``range_size * 2`` are split
-    into multiple synthetic bars so that the constant-range assumption
-    required by downstream ML and indicator logic is preserved.
-
-    Args:
-        df_1m:      Minute-level DataFrame with ``Open/High/Low/Close/Volume``.
-        range_size: Target pip/point range for each bar.
-
-    Returns:
-        DataFrame indexed by ``Timestamp`` with OHLCV columns.
-    """
+    """Convert minute-level OHLCV into fixed-size range bars."""
     bars = []
     current_bar = None
 

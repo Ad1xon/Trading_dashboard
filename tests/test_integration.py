@@ -19,10 +19,7 @@ from quant_engine.strategy_optimizer import monte_carlo_simulation
 
 
 class TestFullPipeline:
-    """
-    End-to-end pipeline tests.
-    Uses synthetic data (no MT5 dependency).
-    """
+    """End-to-end pipeline tests."""
 
     @pytest.mark.parametrize("strat_cls", [
         ZScoreMeanReversion,

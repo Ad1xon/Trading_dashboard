@@ -1,7 +1,4 @@
-"""
-Alert manager — central coordinator with dedup, per-symbol thresholds,
-and multi-channel dispatch via Event Bus.
-"""
+"""Alert manager — central coordinator with dedup, per-symbol thresholds, and multi-channel dispatch via Event Bus."""
 
 import time
 import logging
@@ -14,12 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class AlertManager:
-    """Central alert manager linking scanner / engine signals to notification channels.
-
-    Subscribes to EventBus topics (``TRADE_SIGNAL``, ``LIQUIDITY_SWEEP``).
-    Features duplicate suppression via a configurable cooldown window
-    and per-symbol enable/disable toggles.
-    """
+    """Central alert manager linking scanner / engine signals to notification channels."""
 
     DEFAULT_COOLDOWN_SEC = 300
 
@@ -72,14 +64,7 @@ class AlertManager:
         signal_type: str = "INFO",
         confidence: float | None = None,
     ) -> bool:
-        """Attempt to send an alert.
-
-        Suppresses the alert if: globally disabled, symbol disabled,
-        confidence below threshold, or duplicate within cooldown window.
-
-        Returns:
-            ``True`` if the alert was dispatched successfully.
-        """
+        """Attempt to send an alert."""
         if not self.enabled or not self.is_symbol_enabled(symbol):
             return False
 

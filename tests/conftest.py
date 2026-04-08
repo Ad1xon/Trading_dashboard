@@ -11,10 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 @pytest.fixture
 def synthetic_ohlcv():
-    """
-    Generate a deterministic synthetic OHLCV DataFrame (500 bars).
-    Simulates a mean-reverting price process with known characteristics.
-    """
+    """Generate a deterministic synthetic OHLCV DataFrame (500 bars)."""
     np.random.seed(42)
     n = 500
     timestamps = pd.date_range('2025-01-01', periods=n, freq='1min')

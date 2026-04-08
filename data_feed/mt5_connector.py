@@ -1,6 +1,4 @@
-"""
-MetaTrader5 data connector with multi-timeframe and chunked fetching support.
-"""
+"""MetaTrader5 data connector with multi-timeframe and chunked fetching support."""
 
 import MetaTrader5 as mt5
 import numpy as np
@@ -12,23 +10,7 @@ def get_mt5_data(
     days: int = 730,
     timeframe=mt5.TIMEFRAME_M1,
 ) -> pd.DataFrame:
-    """Fetch OHLCV data from the MT5 terminal.
-
-    Retrieves historical bars in chunks to avoid MT5 API limits.
-    Default history depth is 730 days (≈2 years) so that swing
-    strategies have enough data for indicator warm-up and statistical
-    significance.
-
-    Args:
-        symbol:    MT5 broker symbol (e.g. ``EURUSD.ecn``).
-        days:      Number of calendar days of history to request.
-        timeframe: MT5 timeframe constant (``TIMEFRAME_M1``, ``TIMEFRAME_H1``, etc.).
-
-    Returns:
-        DataFrame indexed by datetime with columns
-        ``['Open', 'High', 'Low', 'Close', 'Volume']``.
-        Empty DataFrame on connection failure.
-    """
+    """Fetch OHLCV data from the MT5 terminal."""
     if not mt5.initialize():
         return pd.DataFrame()
 

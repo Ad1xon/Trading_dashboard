@@ -16,10 +16,7 @@ class TestXGBoostRangeBarModel:
             assert col in features.columns, f"Missing feature column: {col}"
 
     def test_walk_forward_no_lookahead(self, synthetic_ohlcv):
-        """
-        Walk-forward predictions should ONLY exist for the OOS portion
-        (after the initial 70% training window).
-        """
+        """Walk-forward predictions should ONLY exist for the OOS portion         (after the initial 70% training window)."""
         model = XGBoostRangeBarModel()
         result = model.train(synthetic_ohlcv, initial_train_frac=0.70)
 

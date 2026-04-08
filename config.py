@@ -1,16 +1,11 @@
-"""
-Project configuration — symbols, defaults, trading constants, ML hyperparameters.
-"""
+"""Project configuration – symbols, defaults, trading constants, ML hyperparameters."""
 
 import json
 import os
 
 
 def load_translations(lang_code: str) -> dict:
-    """Load JSON i18n file based on language code ('EN' or 'PL').
-
-    Falls back to English if the requested locale file is missing or corrupt.
-    """
+    """Load JSON i18n file based on language code ('EN' or 'PL')."""
     base_dir = os.path.dirname(__file__)
     file_path = os.path.join(base_dir, 'locales', f'{lang_code.lower()}.json')
     try:
@@ -48,6 +43,13 @@ DEFAULT_MAX_HOLDING = 100
 BARS_PER_YEAR = 252
 
 MAX_ALLOWED_LOTS = 50.0
+
+
+TRANSACTION_COST_BPS = 2.5
+SLIPPAGE_PCT = 0.05
+AVERAGE_SPREAD_PIPS = 1.0
+EXECUTION_DELAY_BARS = 1
+ORDER_FILL_PROB = 0.98
 
 XGB_N_ESTIMATORS = 150
 XGB_MAX_DEPTH = 3

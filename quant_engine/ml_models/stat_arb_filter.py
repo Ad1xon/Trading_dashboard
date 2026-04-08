@@ -1,6 +1,4 @@
-"""
-Statistical Arbitrage ML filter for spread-reversion probability.
-"""
+"""Statistical Arbitrage ML filter for spread-reversion probability."""
 
 import pandas as pd
 import numpy as np
@@ -10,12 +8,7 @@ from config import XGB_N_ESTIMATORS, XGB_MAX_DEPTH, XGB_LEARNING_RATE
 
 
 class StatArbMLFilter:
-    """XGBoost classifier estimating the probability of spread reversion.
-
-    Trained on a chronological 80/20 split of spread features to
-    predict whether an extreme Z-score reading will mean-revert within
-    a fixed lookahead window.
-    """
+    """XGBoost classifier estimating the probability of spread reversion."""
 
     def __init__(self):
         self.model = xgb.XGBClassifier(
@@ -31,11 +24,7 @@ class StatArbMLFilter:
         z_score: pd.Series,
         window: int = 10,
     ) -> pd.DataFrame:
-        """Build feature matrix for spread-reversion classification.
-
-        Target is 1 when an extreme Z-score (|z| > 1.5) is followed
-        by a spread move back toward the mean within *window* bars.
-        """
+        """Build feature matrix for spread-reversion classification."""
         df = pd.DataFrame()
         df['Z_Score'] = z_score
         df['Spread_Momentum_3'] = spread.diff(3)
@@ -49,11 +38,7 @@ class StatArbMLFilter:
         return df.dropna()
 
     def train(self, df_features: pd.DataFrame):
-        """Train on an 80 % chronological split.
-
-        Skips training if the split yields fewer than 10 training
-        samples.
-        """
+        """Train on an 80 % chronological split."""
         X = df_features.drop('Target', axis=1)
         y = df_features['Target']
         split_idx = int(len(X) * 0.8)
@@ -65,10 +50,7 @@ class StatArbMLFilter:
         self.is_trained = True
 
     def predict_probability(self, latest_features: pd.DataFrame) -> float:
-        """Return P(reversion) for the latest observation.
-
-        Returns 0.5 (neutral) if the model has not been trained.
-        """
+        """Return P(reversion) for the latest observation."""
         if not self.is_trained:
             return 0.5
         return self.model.predict_proba(latest_features)[0][1]

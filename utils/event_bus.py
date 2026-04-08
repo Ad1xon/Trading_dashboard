@@ -1,6 +1,4 @@
-"""
-Async Event Bus — Pub/Sub architecture decoupling UI, Scanner, and Alerts.
-"""
+"""Async Event Bus — Pub/Sub architecture decoupling UI, Scanner, and Alerts."""
 
 import asyncio
 import logging
@@ -10,12 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class EventBus:
-    """Singleton asynchronous Event Bus.
-
-    Supports both async and sync publishers.  Subscribers receive
-    ``(topic, data)`` arguments.  A background worker can continuously
-    drain the internal ``asyncio.Queue`` for async producers.
-    """
+    """Singleton asynchronous Event Bus."""
 
     _instance = None
 
@@ -42,12 +35,7 @@ class EventBus:
         await self._queue.put({"topic": topic, "data": data})
 
     def publish_sync(self, topic: str, data: dict):
-        """Publish an event synchronously (e.g. from Streamlit callbacks).
-
-        Directly invokes subscribers; async callbacks are run via
-        ``asyncio.run`` or scheduled as tasks if a loop is already
-        running.
-        """
+        """Publish an event synchronously (e."""
         for cb in self._subscribers.get(topic, []):
             if asyncio.iscoroutinefunction(cb):
                 try:
