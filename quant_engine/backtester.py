@@ -1,4 +1,7 @@
-"""Advanced backtester — bar-by-bar simulation with SL/TP, comprehensive metrics."""
+"""
+Advanced backtester — bar-by-bar simulation with SL/TP, MFE trailing,
+lot cap, margin-call circuit breaker, and comprehensive metrics.
+"""
 
 import pandas as pd
 import numpy as np
@@ -6,7 +9,7 @@ from .strategies.base import BaseStrategy
 
 
 def run_advanced_backtest(
-    range_bars_df: pd.DataFrame,
+    trading_data: pd.DataFrame,
     initial_capital: float,
     risk_percent: float,
     slippage: float,
@@ -14,21 +17,44 @@ def run_advanced_backtest(
     commission_pct: float,
     symbol: str = "EURUSD",
 ) -> dict:
-    """Run event-driven backtest on range bars.
+    """Run an event-driven backtest on OHLCV or range-bar data.
 
-    PnL tracked exclusively via bar-by-bar equity updates (no double-counting).
-    Supports ATR-based SL/TP and max holding period from strategy columns.
-    Returns comprehensive metrics dict.
+    PnL is tracked exclusively via bar-by-bar equity updates (no
+    double-counting).  Supports ATR-based SL/TP, MFE trailing stops,
+    and a configurable max-holding period from strategy columns.
+
+    Safety mechanisms:
+        * **Lot cap** — position size is capped at ``MAX_ALLOWED_LOTS``
+          to prevent absurd leverage when equity grows large.
+        * **Margin-call circuit breaker** — if equity drops to zero or
+          below, the simulation halts immediately (account bankruptcy).
+
+    Args:
+        trading_data:    DataFrame with OHLCV columns (range bars *or*
+                         time-based bars).
+        initial_capital: Starting account equity in USD.
+        risk_percent:    Fraction of equity risked per trade (e.g. 0.02).
+        slippage:        Per-trade slippage in price units.
+        strategy:        ``BaseStrategy`` subclass instance.
+        commission_pct:  Commission expressed as fraction of contract.
+        symbol:          Instrument name (used for contract-size lookup).
+
+    Returns:
+        Dict with performance metrics, equity curve, and trade log.
     """
-    df = range_bars_df.copy()
+    from config import (
+        MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT,
+        CONTRACT_SIZES, MAX_ALLOWED_LOTS,
+    )
+
+    df = trading_data.copy()
     df = strategy.generate_signals(df)
 
     n = len(df)
     equity_curve = np.zeros(n)
     equity_curve[0] = initial_capital
 
-    from config import MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT, CONTRACT_SIZES
-    contract_size = CONTRACT_SIZES.get(symbol, 100000.0)
+    contract_size = CONTRACT_SIZES.get(symbol, 100_000.0)
 
     closes = df['Close'].values
     highs = df['High'].values
@@ -69,12 +95,17 @@ def run_advanced_backtest(
     t_exit_reason = np.zeros(max_trades, dtype=object)
     trade_count = 0
 
+    bankrupt = False
+
     for i in range(1, n):
         if current_equity <= 0:
-            equity_curve[i:] = 0
+            current_equity = 0.01
+            equity_curve[i:] = 0.01
+            bankrupt = True
             break
 
         sig = signals[i]
+        pnl = 0.0
 
         if current_position != 0:
             price_change_pct = (closes[i] - closes[i - 1]) / (closes[i - 1] + 1e-8)
@@ -89,12 +120,20 @@ def run_advanced_backtest(
                 mfe = high_since_entry - entry_price
                 risk_dist = entry_price - sl_prices[entry_idx] if has_sl else entry_price * 0.01
                 if risk_dist > 0 and mfe > risk_dist * strat_mfe_activation:
-                    dynamic_sl = max(dynamic_sl, entry_price + mfe * strat_mfe_trail_pct) if not np.isnan(dynamic_sl) else entry_price + mfe * strat_mfe_trail_pct
+                    candidate = entry_price + mfe * strat_mfe_trail_pct
+                    dynamic_sl = max(dynamic_sl, candidate) if not np.isnan(dynamic_sl) else candidate
             else:
                 mfe = entry_price - low_since_entry
                 risk_dist = sl_prices[entry_idx] - entry_price if has_sl else entry_price * 0.01
                 if risk_dist > 0 and mfe > risk_dist * strat_mfe_activation:
-                    dynamic_sl = min(dynamic_sl, entry_price - mfe * strat_mfe_trail_pct) if not np.isnan(dynamic_sl) else entry_price - mfe * strat_mfe_trail_pct
+                    candidate = entry_price - mfe * strat_mfe_trail_pct
+                    dynamic_sl = min(dynamic_sl, candidate) if not np.isnan(dynamic_sl) else candidate
+
+            if current_equity <= 0:
+                current_equity = 0.01
+                equity_curve[i:] = 0.01
+                bankrupt = True
+                break
 
         exit_signal = (
             (current_position == 1 and exit_longs[i])
@@ -132,9 +171,11 @@ def run_advanced_backtest(
             else:
                 actual_exit = closes[i] - exit_slip
 
-            trade_pnl_raw = ((actual_exit - entry_price) / (entry_price + 1e-8)) * position_size_usd * current_position
+            trade_pnl_raw = (
+                (actual_exit - entry_price) / (entry_price + 1e-8)
+            ) * position_size_usd * current_position
 
-            if contract_size == 100000:
+            if contract_size == 100_000:
                 nominal_lot_value = contract_size
             else:
                 nominal_lot_value = contract_size * entry_price
@@ -145,7 +186,16 @@ def run_advanced_backtest(
             trade_pnl = trade_pnl_raw - commission_cost
             current_equity += (trade_pnl - pnl)
 
-            exit_reason = 'MFE_TRAIL' if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl else ('SL' if sl_hit else 'TP' if tp_hit else 'MAX_HOLD' if hold_exit else 'SIGNAL')
+            if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl:
+                exit_reason = 'MFE_TRAIL'
+            elif sl_hit:
+                exit_reason = 'SL'
+            elif tp_hit:
+                exit_reason = 'TP'
+            elif hold_exit:
+                exit_reason = 'MAX_HOLD'
+            else:
+                exit_reason = 'SIGNAL'
 
             t_entry_idx[trade_count] = entry_idx
             t_exit_idx[trade_count] = i
@@ -168,7 +218,17 @@ def run_advanced_backtest(
             entry_price = closes[i] + real_slippage
             vol = stds[i] if not np.isnan(stds[i]) and stds[i] > 0 else (closes[i] * 0.001)
             risk_amt = current_equity * risk_percent
-            position_size_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
+            calculated_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
+
+            if contract_size == 100_000:
+                nominal_lot_value = contract_size
+            else:
+                nominal_lot_value = contract_size * entry_price
+
+            calculated_lots = calculated_usd / (nominal_lot_value + 1e-8)
+            capped_lots = min(calculated_lots, MAX_ALLOWED_LOTS)
+            position_size_usd = capped_lots * nominal_lot_value
+
             current_position = sig
             bars_held = 0
             high_since_entry = highs[i]
@@ -191,8 +251,6 @@ def run_advanced_backtest(
             'exit_reason': t_exit_reason[k],
         })
 
-
-
     df['Strategy_Equity'] = equity_curve
     df['Market_Return'] = df['Close'].pct_change()
     df['BuyHold_Equity'] = initial_capital * (1 + df['Market_Return'].fillna(0)).cumprod()
@@ -200,11 +258,20 @@ def run_advanced_backtest(
     metrics = _compute_metrics(equity_curve, initial_capital, trades_history)
     metrics['equity_curve'] = df[['Strategy_Equity', 'BuyHold_Equity']]
     metrics['trades_history'] = trades_history
+    metrics['bankrupt'] = bankrupt
     return metrics
 
 
-def _compute_metrics(equity_curve: np.ndarray, initial_capital: float, trades: list) -> dict:
-    """Compute Sharpe, Sortino, Calmar, Win Rate, Profit Factor, etc."""
+def _compute_metrics(
+    equity_curve: np.ndarray,
+    initial_capital: float,
+    trades: list,
+) -> dict:
+    """Compute risk-adjusted performance metrics.
+
+    Includes Sharpe, Sortino, Calmar, Win Rate, Profit Factor,
+    max consecutive losses, and annualised return.
+    """
     total_return = (equity_curve[-1] / initial_capital) - 1 if equity_curve[-1] > 0 else -1.0
 
     eq_series = pd.Series(equity_curve)
@@ -217,12 +284,20 @@ def _compute_metrics(equity_curve: np.ndarray, initial_capital: float, trades: l
 
     from config import BARS_PER_YEAR
     bars_per_year = BARS_PER_YEAR
-    sharpe = (bar_returns.mean() / (bar_returns.std() + 1e-10)) * np.sqrt(bars_per_year) if len(bar_returns) > 1 else 0.0
+
+    sharpe = (
+        (bar_returns.mean() / (bar_returns.std() + 1e-10)) * np.sqrt(bars_per_year)
+        if len(bar_returns) > 1 else 0.0
+    )
 
     downside = bar_returns[bar_returns < 0]
-    sortino = (bar_returns.mean() / (downside.std() + 1e-10)) * np.sqrt(bars_per_year) if len(downside) > 1 else 0.0
+    sortino = (
+        (bar_returns.mean() / (downside.std() + 1e-10)) * np.sqrt(bars_per_year)
+        if len(downside) > 1 else 0.0
+    )
 
-    ann_return = total_return * (bars_per_year / max(len(equity_curve), 1))
+    n_bars = max(len(equity_curve), 1)
+    ann_return = (1 + total_return) ** (bars_per_year / n_bars) - 1
     calmar = ann_return / (abs(max_drawdown) + 1e-10)
 
     pnls = [t['pnl'] for t in trades]
@@ -253,7 +328,7 @@ def _compute_metrics(equity_curve: np.ndarray, initial_capital: float, trades: l
 
 
 def _max_consecutive_losses(pnls: list) -> int:
-    """Count longest streak of consecutive losing trades."""
+    """Count the longest streak of consecutive losing trades."""
     max_streak = 0
     current_streak = 0
     for p in pnls:

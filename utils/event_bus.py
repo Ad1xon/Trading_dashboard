@@ -1,41 +1,53 @@
-"""Async Event Bus — Pub/Sub architecture for decoupling UI, Scanner and Alerts."""
+"""
+Async Event Bus — Pub/Sub architecture decoupling UI, Scanner, and Alerts.
+"""
 
 import asyncio
-from typing import Callable, Coroutine
 import logging
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
 
 class EventBus:
-    """Asynchronous Event Bus using asyncio.Queue for multi-producer, multi-consumer streaming."""
-    
+    """Singleton asynchronous Event Bus.
+
+    Supports both async and sync publishers.  Subscribers receive
+    ``(topic, data)`` arguments.  A background worker can continuously
+    drain the internal ``asyncio.Queue`` for async producers.
+    """
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init_bus()
         return cls._instance
-        
+
     def _init_bus(self):
+        """Initialise internal state (called once on first instantiation)."""
         self._subscribers: dict[str, list[Callable]] = {}
         self._queue = asyncio.Queue()
         self._worker_task = None
-        
+
     def subscribe(self, topic: str, callback: Callable):
-        """Subscribe to a specific topic."""
+        """Subscribe *callback* to events on *topic*."""
         if topic not in self._subscribers:
             self._subscribers[topic] = []
         self._subscribers[topic].append(callback)
-        
+
     async def publish(self, topic: str, data: dict):
-        """Publish an event payload to the queue."""
+        """Enqueue an event for async processing by the background worker."""
         await self._queue.put({"topic": topic, "data": data})
-        
+
     def publish_sync(self, topic: str, data: dict):
-        """Publish an event payload synchronously (e.g., from Streamlit)."""
-        import asyncio
+        """Publish an event synchronously (e.g. from Streamlit callbacks).
+
+        Directly invokes subscribers; async callbacks are run via
+        ``asyncio.run`` or scheduled as tasks if a loop is already
+        running.
+        """
         for cb in self._subscribers.get(topic, []):
             if asyncio.iscoroutinefunction(cb):
                 try:
@@ -48,28 +60,28 @@ class EventBus:
                     asyncio.run(cb(topic, data))
             else:
                 cb(topic, data)
-        
+
     def start_worker(self):
-        """Start the background worker to process queue if not already running."""
+        """Start the background worker to drain the async queue."""
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._process_queue())
-            
+
     async def _process_queue(self):
-        """Continuously route messages from queue to subscribers."""
+        """Continuously route messages from the queue to subscribers."""
         while True:
             try:
                 event = await self._queue.get()
                 topic = event["topic"]
                 data = event["data"]
-                
+
                 for cb in self._subscribers.get(topic, []):
                     if asyncio.iscoroutinefunction(cb):
                         asyncio.create_task(cb(topic, data))
                     else:
                         cb(topic, data)
-                        
+
                 self._queue.task_done()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Error processing event {event}: {e}")
+            except Exception as exc:
+                logger.error("Error processing event: %s", exc)

@@ -1,4 +1,3 @@
-# quant_engine/strategies/__init__.py
 """Trading strategies registry."""
 
 from .reversion import ZScoreMeanReversion, MLBounceReversion, VWAPBounceStrategy, MultiTimeframeMomentum

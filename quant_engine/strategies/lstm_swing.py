@@ -1,4 +1,9 @@
-"""Deep Learning Swing Strategy using LSTM."""
+"""
+Deep-Learning swing strategy using LSTM neural network.
+
+Designed for longer time-horizons (H1 / H4 / D1 OHLCV data) rather
+than M1 range bars.
+"""
 
 import pandas as pd
 import numpy as np
@@ -8,10 +13,14 @@ from ..indicators import calculate_atr
 
 
 class LSTMSwingStrategy(BaseStrategy):
+    """Swing trading strategy driven by an LSTM neural network.
+
+    Requires raw OHLCV data at H1/H4/D1 resolution and at least two
+    years of history for statistically meaningful predictions.  The
+    LSTM outputs a bullish probability that is gated by a 200-bar
+    trend filter before producing a signal.
     """
-    Swing trading strategy utilizing an LSTM Neural Network.
-    Designed for longer time horizons (H1/H4 data flows).
-    """
+
     params = {
         'prob_threshold': (0.65, 0.50, 0.80, 0.05),
         'atr_sl_mult': (2.0, 1.0, 4.0, 0.5),
@@ -19,7 +28,13 @@ class LSTMSwingStrategy(BaseStrategy):
         'max_holding': (150, 50, 300, 20),
     }
 
-    def __init__(self, prob_threshold=0.65, atr_sl_mult=2.0, atr_tp_mult=4.0, max_holding=150):
+    def __init__(
+        self,
+        prob_threshold=0.53,
+        atr_sl_mult=2.0,
+        atr_tp_mult=4.0,
+        max_holding=150,
+    ):
         super().__init__()
         self.prob_threshold = prob_threshold
         self.atr_sl_mult = atr_sl_mult
@@ -28,7 +43,9 @@ class LSTMSwingStrategy(BaseStrategy):
         self.ml_model = LSTMSwingModel(sequence_length=30)
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate LSTM-driven swing signals with SMA-200 trend gate."""
         df['ATR'] = calculate_atr(df, 14)
+        df['Std'] = df['Close'].rolling(20).std()
 
         df_copy = df.copy()
         wf_data = self.ml_model.train(df_copy)
@@ -42,7 +59,6 @@ class LSTMSwingStrategy(BaseStrategy):
             if self.ml_model.is_trained:
                 df['LSTM_Prob'] = self.ml_model.predict_proba(df_features)
 
-        # Ustalenie reżimu trendowego dla bezpieczeństwa (np. SMA 200)
         trend_up = df['Close'] > df['Close'].rolling(200).mean()
         trend_down = df['Close'] < df['Close'].rolling(200).mean()
 
@@ -59,14 +75,18 @@ class LSTMSwingStrategy(BaseStrategy):
         short_entries = df['Signal'] == -1
 
         df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - (
-                    self.atr_sl_mult * df.loc[long_entries, 'ATR'])
+            self.atr_sl_mult * df.loc[long_entries, 'ATR']
+        )
         df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + (
-                    self.atr_sl_mult * df.loc[short_entries, 'ATR'])
+            self.atr_sl_mult * df.loc[short_entries, 'ATR']
+        )
 
         df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + (
-                    self.atr_tp_mult * df.loc[long_entries, 'ATR'])
+            self.atr_tp_mult * df.loc[long_entries, 'ATR']
+        )
         df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - (
-                    self.atr_tp_mult * df.loc[short_entries, 'ATR'])
+            self.atr_tp_mult * df.loc[short_entries, 'ATR']
+        )
 
         df['Max_Hold'] = self.max_holding
         return df

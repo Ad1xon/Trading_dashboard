@@ -1,15 +1,26 @@
-"""NLP Sentiment Engine using FinBERT for financial news analysis."""
+"""
+NLP Sentiment Engine — FinBERT-based financial news analysis.
+
+Provides a singleton ``SentimentEngine`` that lazily loads the
+ProsusAI/finbert transformer model and caches per-query results.
+"""
+
+import logging
 
 import feedparser
 import pandas as pd
 import numpy as np
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class SentimentEngine:
-    """Singleton FinBERT sentiment analyzer with lazy loading."""
+    """Singleton FinBERT sentiment analyser with lazy model loading.
+
+    On first sentiment request the HuggingFace pipeline is downloaded
+    and cached.  Subsequent instances share the same model and query
+    cache.
+    """
 
     _instance = None
 
@@ -27,16 +38,24 @@ class SentimentEngine:
         self._initialized = True
 
     def _load_model(self):
+        """Lazily load the FinBERT pipeline on first use."""
         if self.nlp_pipeline is None:
             try:
                 from transformers import pipeline
-                self.nlp_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert")
-            except Exception as e:
-                logger.error(f"Failed to load FinBERT: {e}")
+                self.nlp_pipeline = pipeline(
+                    "sentiment-analysis", model="ProsusAI/finbert",
+                )
+            except Exception as exc:
+                logger.error("Failed to load FinBERT: %s", exc)
                 self.nlp_pipeline = False
 
     def fetch_rss_sentiment(self, query: str) -> float:
-        """Fetch RSS news for a query and return aggregated sentiment score (-1.0 to 1.0)."""
+        """Fetch Google News RSS for *query* and return aggregated sentiment.
+
+        Scores range from -1.0 (strongly bearish) to +1.0 (strongly
+        bullish).  Results are cached per query for the lifetime of the
+        singleton.
+        """
         if query in self._cache:
             return self._cache[query]
 
@@ -44,7 +63,10 @@ class SentimentEngine:
         if not self.nlp_pipeline:
             return 0.0
 
-        url = f"https://news.google.com/rss/search?q={query}+finance&hl=en-US&gl=US&ceid=US:en"
+        url = (
+            f"https://news.google.com/rss/search?"
+            f"q={query}+finance&hl=en-US&gl=US&ceid=US:en"
+        )
         try:
             feed = feedparser.parse(url)
             headlines = [entry.title for entry in feed.entries[:5]]
@@ -64,12 +86,19 @@ class SentimentEngine:
             final_score = float(np.mean(scores))
             self._cache[query] = final_score
             return final_score
-        except Exception as e:
-            logger.error(f"RSS fetch failed for {query}: {e}")
+        except Exception as exc:
+            logger.error("RSS fetch failed for %s: %s", query, exc)
             return 0.0
 
-    def apply_sentiment_to_dataframe(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-        """Vectorized application of daily sentiment to a Range Bar DataFrame."""
+    def apply_sentiment_to_dataframe(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+    ) -> pd.DataFrame:
+        """Apply the current sentiment score to the last bar of *df*.
+
+        Creates the ``Sentiment_Score`` column if it doesn't exist.
+        """
         df = df.copy()
         if 'Sentiment_Score' not in df.columns:
             df['Sentiment_Score'] = 0.0

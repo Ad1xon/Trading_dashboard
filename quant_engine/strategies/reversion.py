@@ -1,29 +1,48 @@
-# quant_engine/strategies/reversion.py
-"""Mean reversion strategies."""
+"""
+Mean-reversion strategies — Z-Score, ML-Bounce, VWAP Bounce, MTF Momentum.
+"""
 
 import pandas as pd
 import numpy as np
 from .base import BaseStrategy
 from ..indicators import (
     calculate_rsi, calculate_atr, calculate_bollinger,
-    calculate_vwap_with_bands, calculate_adx
+    calculate_vwap_with_bands, calculate_adx,
 )
 from ..ml_models import XGBoostRangeBarModel
 
 
 class ZScoreMeanReversion(BaseStrategy):
-    """Mean-reversion on Z-score extremes with RSI confirmation and ADX regime filter."""
+    """Mean-reversion on Z-score extremes with RSI and ADX regime filter.
+
+    Enters when the Z-score exceeds a threshold *and* RSI confirms
+    oversold/overbought *and* ADX indicates a non-trending (ranging)
+    market.  Exits when the Z-score crosses zero.
+    """
 
     params = {
-        'z_window': (20, 10, 60, 5), 'z_entry': (2.0, 1.5, 3.0, 0.25),
-        'z_exit': (0.5, 0.0, 1.0, 0.25), 'rsi_long': (30, 20, 40, 5),
-        'rsi_short': (70, 60, 80, 5), 'adx_max': (25, 15, 35, 5),
-        'atr_sl_mult': (2.0, 1.0, 4.0, 0.5), 'max_holding': (100, 50, 300, 50),
+        'z_window': (20, 10, 60, 5),
+        'z_entry': (2.0, 1.5, 3.0, 0.25),
+        'z_exit': (0.5, 0.0, 1.0, 0.25),
+        'rsi_long': (30, 20, 40, 5),
+        'rsi_short': (70, 60, 80, 5),
+        'adx_max': (25, 15, 35, 5),
+        'atr_sl_mult': (2.0, 1.0, 4.0, 0.5),
+        'max_holding': (100, 50, 300, 50),
     }
 
-    def __init__(self, z_window=20, z_entry=2.0, z_exit=0.5,
-                 rsi_long=30, rsi_short=70, adx_max=25,
-                 atr_sl_mult=2.0, max_holding=100):
+    def __init__(
+        self,
+        z_window=20,
+        z_entry=2.0,
+        z_exit=0.5,
+        rsi_long=30,
+        rsi_short=70,
+        adx_max=25,
+        atr_sl_mult=2.0,
+        max_holding=100,
+    ):
+        super().__init__()
         self.z_window = z_window
         self.z_entry = z_entry
         self.z_exit = z_exit
@@ -34,6 +53,7 @@ class ZScoreMeanReversion(BaseStrategy):
         self.max_holding = max_holding
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate Z-score mean-reversion signals with RSI + ADX filters."""
         df['Mean'] = df['Close'].rolling(window=self.z_window).mean()
         df['Std'] = df['Close'].rolling(window=self.z_window).std()
         df['Z_Score'] = (df['Close'] - df['Mean']) / (df['Std'] + 1e-8)
@@ -63,21 +83,32 @@ class ZScoreMeanReversion(BaseStrategy):
 
 
 class MLBounceReversion(BaseStrategy):
-    """Mean reversion strategy integrating XGBoost directional bias and Bollinger Bands.
+    """Bollinger Band bounce with XGBoost directional-bias confirmation.
 
-    Trades against extreme momentum when ML confidence supports the reversal.
-    Handles highly noisy and ranging M1 micro-structure periods much better than breakout.
+    Trades against extreme momentum when the ML model's bullish
+    probability supports the reversal.  Designed for noisy, ranging
+    micro-structure periods.
     """
 
     params = {
-        'bb_period': (20, 10, 40, 5), 'bb_std': (2.0, 1.5, 3.0, 0.5),
+        'bb_period': (20, 10, 40, 5),
+        'bb_std': (2.0, 1.5, 3.0, 0.5),
         'prob_threshold': (0.55, 0.50, 0.70, 0.05),
-        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5), 'atr_tp_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_tp_mult': (1.5, 1.0, 3.0, 0.5),
         'max_holding': (50, 20, 150, 10),
     }
 
-    def __init__(self, bb_period=20, bb_std=2.0, prob_threshold=0.55,
-                 atr_sl_mult=1.5, atr_tp_mult=1.5, max_holding=50):
+    def __init__(
+        self,
+        bb_period=20,
+        bb_std=2.0,
+        prob_threshold=0.55,
+        atr_sl_mult=1.5,
+        atr_tp_mult=1.5,
+        max_holding=50,
+    ):
+        super().__init__()
         self.bb_period = bb_period
         self.bb_std = bb_std
         self.prob_threshold = prob_threshold
@@ -87,6 +118,7 @@ class MLBounceReversion(BaseStrategy):
         self.ml_model = XGBoostRangeBarModel(tp_mult=atr_tp_mult, sl_mult=atr_sl_mult)
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate ML-filtered Bollinger bounce signals."""
         atr = calculate_atr(df, 14)
         df['ATR'] = atr
         bb = calculate_bollinger(df['Close'], self.bb_period, self.bb_std)
@@ -122,34 +154,46 @@ class MLBounceReversion(BaseStrategy):
 
         df['SL_Price'] = np.nan
         df['TP_Price'] = np.nan
+        df['Std'] = df['Close'].rolling(self.bb_period).std()
         long_entries = df['Signal'] == 1
         short_entries = df['Signal'] == -1
 
-        df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[
-            long_entries, 'ATR']
-        df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[
-            short_entries, 'ATR']
+        df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[short_entries, 'ATR']
 
-        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[
-            long_entries, 'ATR']
-        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[
-            short_entries, 'ATR']
+        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[short_entries, 'ATR']
 
         df['Max_Hold'] = self.max_holding
         return df
 
 
 class VWAPBounceStrategy(BaseStrategy):
-    """VWAP band bounce with RSI + volume confirmation and ATR SL/TP."""
+    """VWAP ±2σ band bounce with RSI and volume confirmation.
+
+    Enters when price touches VWAP bands, RSI confirms extremes,
+    and volume exceeds its rolling average.
+    """
 
     params = {
-        'vol_mult': (1.5, 1.0, 3.0, 0.25), 'rsi_oversold': (35, 20, 40, 5),
-        'rsi_overbought': (65, 60, 80, 5), 'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
-        'atr_tp_mult': (2.5, 1.5, 4.0, 0.5), 'max_holding': (80, 40, 200, 20),
+        'vol_mult': (1.5, 1.0, 3.0, 0.25),
+        'rsi_oversold': (35, 20, 40, 5),
+        'rsi_overbought': (65, 60, 80, 5),
+        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_tp_mult': (2.5, 1.5, 4.0, 0.5),
+        'max_holding': (80, 40, 200, 20),
     }
 
-    def __init__(self, vol_mult=1.5, rsi_oversold=35, rsi_overbought=65,
-                 atr_sl_mult=1.5, atr_tp_mult=2.5, max_holding=80):
+    def __init__(
+        self,
+        vol_mult=1.5,
+        rsi_oversold=35,
+        rsi_overbought=65,
+        atr_sl_mult=1.5,
+        atr_tp_mult=2.5,
+        max_holding=80,
+    ):
+        super().__init__()
         self.vol_mult = vol_mult
         self.rsi_oversold = rsi_oversold
         self.rsi_overbought = rsi_overbought
@@ -158,6 +202,7 @@ class VWAPBounceStrategy(BaseStrategy):
         self.max_holding = max_holding
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate VWAP-bounce signals with ATR-based SL/TP."""
         df = calculate_vwap_with_bands(df)
         df['RSI'] = calculate_rsi(df['Close'], 14)
         atr = calculate_atr(df, 14)
@@ -190,16 +235,32 @@ class VWAPBounceStrategy(BaseStrategy):
 
 
 class MultiTimeframeMomentum(BaseStrategy):
-    """Trend on slow MA, entry on fast RSI pullback. ATR trailing exit."""
+    """Trend on slow MA, entry on fast-RSI pullback.
+
+    Uses a slow moving average for direction and a short-period RSI
+    for entry timing (buy dips in uptrends, sell rallies in downtrends).
+    Exit via ATR-based Chandelier trailing stop.
+    """
 
     params = {
-        'slow_ma': (100, 50, 200, 25), 'fast_rsi_len': (7, 5, 14, 1),
-        'rsi_entry': (30, 20, 40, 5), 'atr_sl_mult': (2.0, 1.0, 3.0, 0.5),
-        'atr_trail_mult': (2.5, 1.5, 4.0, 0.5), 'max_holding': (150, 50, 300, 50),
+        'slow_ma': (100, 50, 200, 25),
+        'fast_rsi_len': (7, 5, 14, 1),
+        'rsi_entry': (30, 20, 40, 5),
+        'atr_sl_mult': (2.0, 1.0, 3.0, 0.5),
+        'atr_trail_mult': (2.5, 1.5, 4.0, 0.5),
+        'max_holding': (150, 50, 300, 50),
     }
 
-    def __init__(self, slow_ma=100, fast_rsi_len=7, rsi_entry=30,
-                 atr_sl_mult=2.0, atr_trail_mult=2.5, max_holding=150):
+    def __init__(
+        self,
+        slow_ma=100,
+        fast_rsi_len=7,
+        rsi_entry=30,
+        atr_sl_mult=2.0,
+        atr_trail_mult=2.5,
+        max_holding=150,
+    ):
+        super().__init__()
         self.slow_ma = slow_ma
         self.fast_rsi_len = fast_rsi_len
         self.rsi_entry = rsi_entry
@@ -208,6 +269,7 @@ class MultiTimeframeMomentum(BaseStrategy):
         self.max_holding = max_holding
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate momentum signals — slow-MA trend + fast-RSI pullback."""
         df['Slow_MA'] = df['Close'].rolling(self.slow_ma).mean()
         df['Fast_RSI'] = calculate_rsi(df['Close'], self.fast_rsi_len)
         atr = calculate_atr(df, 14)

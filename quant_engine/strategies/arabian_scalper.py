@@ -1,4 +1,9 @@
-"""Arabian Scalper with Risk Management (1:3 R:R)."""
+"""
+Arabian Volume Scalper with Risk Management (fixed 1:3 R:R).
+
+Combines momentum + volume surge detection with LightGBM probability
+gating, NLP sentiment, and macro-event blackout.
+"""
 
 import pandas as pd
 import numpy as np
@@ -9,18 +14,27 @@ from data_feed.nlp_engine import SentimentEngine
 
 
 class ArabianScalper(BaseStrategy):
+    """Arabian Scalper — momentum + volume surge with LGBM confirmation.
+
+    Uses a fixed risk-to-reward ratio (default 1:3) and caps the
+    maximum holding period at 50 bars.  NLP sentiment and macro-event
+    filtering are applied automatically.
     """
-    Arabian Scalper with Risk Management (1:3 R:R).
-    Uses LightGBM for signal confirmation + Macro/NLP integration.
-    """
+
     params = {
         'lookback': (10, 5, 20, 1),
         'prob_threshold': (0.60, 0.50, 0.70, 0.05),
         'risk_atr_cap': (1.5, 1.0, 2.5, 0.5),
-        'reward_multiplier': (3.0, 2.0, 5.0, 0.5)
+        'reward_multiplier': (3.0, 2.0, 5.0, 0.5),
     }
 
-    def __init__(self, lookback=10, prob_threshold=0.60, risk_atr_cap=1.5, reward_multiplier=3.0):
+    def __init__(
+        self,
+        lookback=10,
+        prob_threshold=0.60,
+        risk_atr_cap=1.5,
+        reward_multiplier=3.0,
+    ):
         super().__init__()
         self.lookback = lookback
         self.prob_threshold = prob_threshold
@@ -30,9 +44,11 @@ class ArabianScalper(BaseStrategy):
         self.nlp = SentimentEngine()
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate scalp signals with LGBM, NLP, and macro filters."""
         df = self.nlp.apply_sentiment_to_dataframe(df, "Market")
 
         df['ATR'] = calculate_atr(df, 14)
+        df['Std'] = df['Close'].rolling(20).std()
         df['Momentum'] = df['Close'].diff(self.lookback)
         df['Vol_Surge'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.5
 
@@ -69,14 +85,18 @@ class ArabianScalper(BaseStrategy):
         short_entries = df['Signal'] == -1
 
         df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - (
-                    self.risk_atr_cap * df.loc[long_entries, 'ATR'])
+            self.risk_atr_cap * df.loc[long_entries, 'ATR']
+        )
         df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + (
-                    self.risk_atr_cap * df.loc[short_entries, 'ATR'])
+            self.risk_atr_cap * df.loc[short_entries, 'ATR']
+        )
 
         df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + (
-                    self.risk_atr_cap * self.reward_multiplier * df.loc[long_entries, 'ATR'])
+            self.risk_atr_cap * self.reward_multiplier * df.loc[long_entries, 'ATR']
+        )
         df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - (
-                    self.risk_atr_cap * self.reward_multiplier * df.loc[short_entries, 'ATR'])
+            self.risk_atr_cap * self.reward_multiplier * df.loc[short_entries, 'ATR']
+        )
 
         df['Max_Hold'] = 50
         return df

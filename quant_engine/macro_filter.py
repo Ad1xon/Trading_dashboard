@@ -1,24 +1,43 @@
-"""Macroeconomic event filter for volatility blackout periods."""
+"""
+Macroeconomic event filter for volatility blackout periods.
+
+Fetches high-impact events from the ForexFactory XML feed and
+zeroes out trading signals within a configurable window around
+each event.
+"""
+
+import logging
 
 import pandas as pd
 import numpy as np
 from datetime import timedelta
-import logging
 import requests
 import xml.etree.ElementTree as ET
 from config import MACRO_BLACKOUT_MINUTES
 
 logger = logging.getLogger(__name__)
 
+
 class MacroFilter:
-    """Manages trading blackouts around high-impact economic events."""
+    """Manages trading blackouts around high-impact economic events.
+
+    On instantiation, fetches the current week's ForexFactory calendar
+    and stores timestamps of all "High" impact releases.
+    """
 
     def __init__(self, blackout_minutes: int = MACRO_BLACKOUT_MINUTES):
         self.blackout_minutes = blackout_minutes
         self.high_impact_events = self._fetch_economic_calendar()
 
     def _fetch_economic_calendar(self) -> pd.DatetimeIndex:
-        """Fetch high-impact events from ForexFactory XML feed."""
+        """Fetch high-impact events from ForexFactory XML feed.
+
+        Parses the weekly calendar, filters for "High" impact, and
+        converts US/Eastern timestamps to tz-naive UTC.
+
+        Returns:
+            ``DatetimeIndex`` of event times (tz-naive UTC).
+        """
         url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
         events = []
         try:
@@ -33,12 +52,14 @@ class MacroFilter:
 
                         if time_str and "All Day" not in time_str and "Tentative" not in time_str:
                             dt_str = f"{date_str} {time_str}"
-                            dt_obj = pd.to_datetime(dt_str, format="%m-%d-%Y %I:%M%p", errors='coerce')
+                            dt_obj = pd.to_datetime(
+                                dt_str, format="%m-%d-%Y %I:%M%p", errors='coerce',
+                            )
                             if pd.notnull(dt_obj):
                                 events.append(dt_obj)
 
-        except Exception as e:
-            logger.error(f"Failed to fetch economic calendar: {e}")
+        except Exception as exc:
+            logger.error("Failed to fetch economic calendar: %s", exc)
 
         if not events:
             return pd.DatetimeIndex([])
@@ -46,14 +67,22 @@ class MacroFilter:
         event_series = pd.Series(events)
 
         try:
-            event_series = event_series.dt.tz_localize('US/Eastern').dt.tz_convert('UTC').dt.tz_localize(None)
+            event_series = (
+                event_series.dt.tz_localize('US/Eastern')
+                .dt.tz_convert('UTC')
+                .dt.tz_localize(None)
+            )
         except Exception:
             pass
 
         return pd.DatetimeIndex(event_series)
 
     def apply_blackout_mask(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Vectorized nullification of signals during blackout windows."""
+        """Vectorised nullification of signals during blackout windows.
+
+        Sets ``Signal`` to 0 for any bar falling within ± *blackout_minutes*
+        of a high-impact event.
+        """
         df = df.copy()
         if 'Signal' not in df.columns or self.high_impact_events.empty:
             return df

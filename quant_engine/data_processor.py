@@ -1,15 +1,27 @@
-"""Range bar generator from M1 OHLCV data with large-candle splitting."""
+"""
+Range bar generator from M1 OHLCV data with large-candle splitting.
+"""
 
 import pandas as pd
 import numpy as np
 
 
-def generate_synthetic_range_bars(df_1m: pd.DataFrame, range_size: float) -> pd.DataFrame:
-    """Convert 1-minute OHLCV into fixed-size range bars.
+def generate_synthetic_range_bars(
+    df_1m: pd.DataFrame,
+    range_size: float,
+) -> pd.DataFrame:
+    """Convert minute-level OHLCV into fixed-size range bars.
 
-    Large M1 candles exceeding range_size are split into multiple
-    synthetic bars to preserve the constant-range assumption required
-    by downstream ML and indicator logic.
+    Large M1 candles whose High–Low exceeds ``range_size * 2`` are split
+    into multiple synthetic bars so that the constant-range assumption
+    required by downstream ML and indicator logic is preserved.
+
+    Args:
+        df_1m:      Minute-level DataFrame with ``Open/High/Low/Close/Volume``.
+        range_size: Target pip/point range for each bar.
+
+    Returns:
+        DataFrame indexed by ``Timestamp`` with OHLCV columns.
     """
     bars = []
     current_bar = None
@@ -40,7 +52,7 @@ def generate_synthetic_range_bars(df_1m: pd.DataFrame, range_size: float) -> pd.
                 seg_open = start + s * step
                 seg_close = start + (s + 1) * step
                 bars.append({
-                    'Timestamp': index + pd.Timedelta(microseconds=s*10),
+                    'Timestamp': index + pd.Timedelta(microseconds=s * 10),
                     'Open': seg_open,
                     'High': max(seg_open, seg_close),
                     'Low': min(seg_open, seg_close),

@@ -1,20 +1,32 @@
-"""LightGBM model implementation."""
+"""
+LightGBM model — leaf-wise gradient boosting variant for scalping signals.
+
+Inherits feature engineering, walk-forward logic, and caching from
+``XGBoostRangeBarModel``.  Overrides only the model object and the
+``train`` dispatch to route through the shared cache with
+``model_type='lightgbm'``.
+"""
 
 import pandas as pd
 import lightgbm as lgb
 
 from .xgb_model import XGBoostRangeBarModel, _cached_walk_forward_train
-from config import (
-    XGB_N_ESTIMATORS, XGB_LEARNING_RATE, XGB_TP_MULT, XGB_SL_MULT
-)
+from config import XGB_N_ESTIMATORS, XGB_LEARNING_RATE, XGB_TP_MULT, XGB_SL_MULT
+
 
 class LGBMRangeBarModel(XGBoostRangeBarModel):
+    """LightGBM classifier for scalping-oriented direction prediction.
+
+    Uses leaf-wise tree growth for speed on noisy bar data.
+    All feature engineering and MFE target construction are inherited;
+    only the underlying estimator differs.
     """
-    LightGBM model for Scalping.
-    Uses Leaf-wise growth for extreme speed and precision on noisy Range Bars.
-    Inherits feature engineering and Walk-Forward logic from XGBoostRangeBarModel.
-    """
-    def __init__(self, tp_mult: float = XGB_TP_MULT, sl_mult: float = XGB_SL_MULT):
+
+    def __init__(
+        self,
+        tp_mult: float = XGB_TP_MULT,
+        sl_mult: float = XGB_SL_MULT,
+    ):
         super().__init__(tp_mult=tp_mult, sl_mult=sl_mult)
         self.model = lgb.LGBMClassifier(
             num_leaves=31,
@@ -26,16 +38,21 @@ class LGBMRangeBarModel(XGBoostRangeBarModel):
             subsample=0.8,
             colsample_bytree=0.8,
             n_jobs=-1,
-            verbose=-1
+            verbose=-1,
         )
 
     def train(self, df: pd.DataFrame, initial_train_frac: float = 0.70):
-        """Expanding-window walk-forward training for LightGBM. Caches via joblib."""
+        """Expanding-window walk-forward training via LightGBM.
+
+        Delegates to the shared ``_cached_walk_forward_train`` with
+        ``model_type='lightgbm'``.
+        """
         data, model, fi, cv_scores = _cached_walk_forward_train(
             df.index, df.values, df.columns, initial_train_frac,
             self.model.n_estimators, -1, self.model.learning_rate,
-            self.horizon_param, self.refit_param, self.tp_mult, self.sl_mult, self.FEATURE_COLS,
-            model_type='lightgbm'
+            self.horizon_param, self.refit_param,
+            self.tp_mult, self.sl_mult, self.FEATURE_COLS,
+            model_type='lightgbm',
         )
         if data is None:
             return None

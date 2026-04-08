@@ -1,5 +1,6 @@
-# quant_engine/strategies/breakout.py
-"""Breakout strategies."""
+"""
+Breakout strategies — SMC-style and XGBoost-enhanced.
+"""
 
 import pandas as pd
 import numpy as np
@@ -9,16 +10,32 @@ from ..ml_models import XGBoostRangeBarModel
 
 
 class VolatilityBreakout(BaseStrategy):
-    """Breakout above rolling high/low with volume + trend confirmation and Chandelier exit."""
+    """Breakout above rolling high/low with volume, trend, and ATR confirmation.
+
+    Entry: price breaks the N-bar high/low *and* volume exceeds its
+    rolling average *and* ATR is expanding *and* the macro trend agrees.
+    Exit: Chandelier-style trailing stop based on ATR.
+    """
 
     params = {
-        'lookback': (20, 10, 40, 5), 'vol_mult': (1.5, 1.0, 3.0, 0.25),
-        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5), 'atr_trail_mult': (3.0, 2.0, 5.0, 0.5),
-        'ma_trend_len': (50, 20, 100, 10), 'max_holding': (100, 50, 300, 50),
+        'lookback': (20, 10, 40, 5),
+        'vol_mult': (1.5, 1.0, 3.0, 0.25),
+        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_trail_mult': (3.0, 2.0, 5.0, 0.5),
+        'ma_trend_len': (50, 20, 100, 10),
+        'max_holding': (100, 50, 300, 50),
     }
 
-    def __init__(self, lookback=20, vol_mult=1.5, atr_sl_mult=1.5,
-                 atr_trail_mult=3.0, ma_trend_len=50, max_holding=100):
+    def __init__(
+        self,
+        lookback=20,
+        vol_mult=1.5,
+        atr_sl_mult=1.5,
+        atr_trail_mult=3.0,
+        ma_trend_len=50,
+        max_holding=100,
+    ):
+        super().__init__()
         self.lookback = lookback
         self.vol_mult = vol_mult
         self.atr_sl_mult = atr_sl_mult
@@ -27,6 +44,7 @@ class VolatilityBreakout(BaseStrategy):
         self.max_holding = max_holding
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate breakout signals with ATR-based SL and Chandelier exit."""
         df['Local_High'] = df['High'].rolling(window=self.lookback).max().shift(1)
         df['Local_Low'] = df['Low'].rolling(window=self.lookback).min().shift(1)
         df['Mean'] = df['Close'].rolling(window=self.lookback).mean()
@@ -63,16 +81,32 @@ class VolatilityBreakout(BaseStrategy):
 
 
 class MLVolatilityBreakout(BaseStrategy):
-    """ML-enhanced breakout — walk-forward XGBoost probability filter with ATR trailing exit."""
+    """ML-enhanced breakout — walk-forward XGBoost probability filter.
+
+    Adds a bullish/bearish probability gate on top of the structural
+    breakout condition.  Only fires when the ML model agrees with the
+    price-action signal above/below a configurable threshold.
+    """
 
     params = {
-        'lookback': (20, 10, 40, 5), 'prob_threshold': (0.55, 0.50, 0.70, 0.05),
-        'atr_trail_mult': (3.0, 2.0, 5.0, 0.5), 'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
-        'atr_tp_mult': (2.0, 1.0, 4.0, 0.5), 'max_holding': (100, 50, 300, 50),
+        'lookback': (20, 10, 40, 5),
+        'prob_threshold': (0.55, 0.50, 0.70, 0.05),
+        'atr_trail_mult': (3.0, 2.0, 5.0, 0.5),
+        'atr_sl_mult': (1.5, 1.0, 3.0, 0.5),
+        'atr_tp_mult': (2.0, 1.0, 4.0, 0.5),
+        'max_holding': (100, 50, 300, 50),
     }
 
-    def __init__(self, lookback=20, prob_threshold=0.55,
-                 atr_trail_mult=3.0, atr_sl_mult=1.5, atr_tp_mult=2.0, max_holding=100):
+    def __init__(
+        self,
+        lookback=20,
+        prob_threshold=0.55,
+        atr_trail_mult=3.0,
+        atr_sl_mult=1.5,
+        atr_tp_mult=2.0,
+        max_holding=100,
+    ):
+        super().__init__()
         self.lookback = lookback
         self.prob_threshold = prob_threshold
         self.atr_trail_mult = atr_trail_mult
@@ -82,6 +116,7 @@ class MLVolatilityBreakout(BaseStrategy):
         self.ml_model = XGBoostRangeBarModel(tp_mult=atr_tp_mult, sl_mult=atr_sl_mult)
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Generate ML-filtered breakout signals with ATR SL/TP."""
         df['Macro_Trend'] = df['Close'].rolling(window=100).mean()
         atr = calculate_atr(df, 14)
         df['ATR'] = atr
@@ -126,15 +161,11 @@ class MLVolatilityBreakout(BaseStrategy):
         df['TP_Price'] = np.nan
         long_entries = df['Signal'] == 1
         short_entries = df['Signal'] == -1
-        df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[
-            long_entries, 'ATR']
-        df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[
-            short_entries, 'ATR']
+        df.loc[long_entries, 'SL_Price'] = df.loc[long_entries, 'Close'] - self.atr_sl_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'SL_Price'] = df.loc[short_entries, 'Close'] + self.atr_sl_mult * df.loc[short_entries, 'ATR']
 
-        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[
-            long_entries, 'ATR']
-        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[
-            short_entries, 'ATR']
+        df.loc[long_entries, 'TP_Price'] = df.loc[long_entries, 'Close'] + self.atr_tp_mult * df.loc[long_entries, 'ATR']
+        df.loc[short_entries, 'TP_Price'] = df.loc[short_entries, 'Close'] - self.atr_tp_mult * df.loc[short_entries, 'ATR']
 
         df['Max_Hold'] = self.max_holding
         return df

@@ -1,4 +1,6 @@
-"""Dashboard views — scanner, backtester, alert center, sentiment."""
+"""
+Dashboard views — scanner, backtester, alert center, macro & sentiment.
+"""
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -9,7 +11,7 @@ from datetime import timedelta
 
 from config import (
     load_translations, MT5_SYMBOLS, COMMISSION_USD_PER_LOT,
-    CONTRACT_SIZES
+    CONTRACT_SIZES,
 )
 from data_feed.mt5_connector import get_mt5_data
 from data_feed.nlp_engine import SentimentEngine
@@ -23,13 +25,18 @@ from alerts.alert_manager import AlertManager
 from quant_engine.macro_filter import MacroFilter
 
 
+SWING_STRATEGIES = {'LSTM Swing'}
+
+
 def _get_alert_manager() -> AlertManager:
+    """Retrieve or create the singleton AlertManager from session state."""
     if 'alert_manager' not in st.session_state:
         st.session_state.alert_manager = AlertManager()
     return st.session_state.alert_manager
 
 
 def render_scanner_view(lang: str):
+    """Render the multi-symbol market scanner tab."""
     t = load_translations(lang)
     st.sidebar.header(t.get("settings", "Settings"))
 
@@ -45,24 +52,25 @@ def render_scanner_view(lang: str):
         "M15 (Time-based)": mt5.TIMEFRAME_M15,
         "H1 (Time-based)": mt5.TIMEFRAME_H1,
         "H4 (Time-based)": mt5.TIMEFRAME_H4,
-        "D1 (Time-based)": mt5.TIMEFRAME_D1
+        "D1 (Time-based)": mt5.TIMEFRAME_D1,
     }
 
     data_mode_scan = st.sidebar.selectbox(
-        "Timeframe / Data Mode", list(tf_options.keys()), key="scanner_data_mode"
+        "Timeframe / Data Mode", list(tf_options.keys()), key="scanner_data_mode",
     )
 
     scan_days = st.sidebar.slider("Scan Depth (days)", 1, 30, 5, key="scanner_days")
 
     if "Range Bars" in data_mode_scan:
         range_val = st.sidebar.number_input(
-            t.get("range_size", "Range Bar Size"), value=0.001, format="%.5f", key="scanner_range_size",
+            t.get("range_size", "Range Bar Size"),
+            value=0.001, format="%.5f", key="scanner_range_size",
         )
     else:
         range_val = None
 
     if st.button(t.get("run_scanner", "Run Scanner"), key="btn_scanner"):
-        with st.spinner(t.get("scanner_running", "Scanning markets...")):  # type: ignore
+        with st.spinner(t.get("scanner_running", "Scanning markets...")):
             scan_results = []
 
             from utils.event_bus import EventBus
@@ -100,7 +108,7 @@ def render_scanner_view(lang: str):
                         "symbol": sym_name,
                         "message": sweep["message"],
                         "signal_type": sweep["type"],
-                        "confidence": confidence
+                        "confidence": confidence,
                     })
 
                 scan_results.append({
@@ -124,42 +132,58 @@ def render_scanner_view(lang: str):
                         return "background-color: #4f0d0d; color: #ff4444"
                     return ""
 
-                styled = res_df.style.map(_highlight_signal, subset=[t.get("col_signal", "Signal")])
+                styled = res_df.style.map(
+                    _highlight_signal, subset=[t.get("col_signal", "Signal")],
+                )
                 st.dataframe(styled, use_container_width=True)
             else:
                 st.info(t.get("scanner_no_data", "No data available for scan."))
 
 
 def render_backtester_view(lang: str):
+    """Render the advanced backtester tab with strategy-aware data defaults."""
     t = load_translations(lang)
     st.sidebar.header(t.get("backtest_params", "Backtest Parameters"))
 
     selected_name = st.sidebar.selectbox(
-        t.get("symbol_input", "Scanner Symbols"), list(MT5_SYMBOLS.keys()), key="bt_symbol",
+        t.get("symbol_input", "Scanner Symbols"),
+        list(MT5_SYMBOLS.keys()), key="bt_symbol",
     )
     symbol = MT5_SYMBOLS[selected_name]
-
-    days_back = st.sidebar.slider(t.get("history_days", "History Depth (Days)"), 1, 365, 30, key="bt_days")
-
-    tf_options = {
-        "Range Bars (M1 Base)": mt5.TIMEFRAME_M1,
-        "M15 (Time-based)": mt5.TIMEFRAME_M15,
-        "H1 (Time-based)": mt5.TIMEFRAME_H1,
-        "H4 (Time-based)": mt5.TIMEFRAME_H4,
-        "D1 (Time-based)": mt5.TIMEFRAME_D1
-    }
-
-    data_mode = st.sidebar.selectbox(
-        "Timeframe / Data Mode", list(tf_options.keys()), key="bt_data_mode"
-    )
 
     strat_options = list(STRATEGY_REGISTRY.keys())
     strategy_choice = st.sidebar.selectbox(
         t.get("strat_select", "Select Strategy"), strat_options, key="bt_strategy",
     )
 
-    capital = st.sidebar.number_input(t.get("capital", "Initial Capital (USD)"), value=10000.0, key="bt_capital")
-    risk = st.sidebar.number_input(t.get("risk", "Risk per Trade (%)"), value=2.0, key="bt_risk") / 100.0
+    is_swing = strategy_choice in SWING_STRATEGIES
+    default_days = 730 if is_swing else 365
+
+    days_back = st.sidebar.slider(
+        t.get("history_days", "History Depth (Days)"),
+        1, 5000, default_days, key="bt_days",
+    )
+
+    tf_options = {
+        "Range Bars (M1 Base)": mt5.TIMEFRAME_M1,
+        "M15 (Time-based)": mt5.TIMEFRAME_M15,
+        "H1 (Time-based)": mt5.TIMEFRAME_H1,
+        "H4 (Time-based)": mt5.TIMEFRAME_H4,
+        "D1 (Time-based)": mt5.TIMEFRAME_D1,
+    }
+
+    default_tf_idx = 2 if is_swing else 0
+    data_mode = st.sidebar.selectbox(
+        "Timeframe / Data Mode", list(tf_options.keys()),
+        index=default_tf_idx, key="bt_data_mode",
+    )
+
+    capital = st.sidebar.number_input(
+        t.get("capital", "Initial Capital (USD)"), value=10000.0, key="bt_capital",
+    )
+    risk = st.sidebar.number_input(
+        t.get("risk", "Risk per Trade (%)"), value=2.0, key="bt_risk",
+    ) / 100.0
 
     def_range = 0.0010
     def_slip = 0.0001
@@ -172,17 +196,21 @@ def render_backtester_view(lang: str):
 
     if "Range Bars" in data_mode:
         range_val = st.sidebar.number_input(
-            t.get("range_size", "Range Bar Size"), value=def_range, format="%.5f", key=f"bt_range_{selected_name}",
+            t.get("range_size", "Range Bar Size"),
+            value=def_range, format="%.5f",
+            key=f"bt_range_{selected_name}",
         )
     else:
         range_val = None
 
     slippage = st.sidebar.number_input(
-        t.get("slippage", "Price Slippage"), value=def_slip, format="%.5f", key=f"bt_slip_{selected_name}",
+        t.get("slippage", "Price Slippage"),
+        value=def_slip, format="%.5f",
+        key=f"bt_slip_{selected_name}",
     )
 
     if st.button(t.get("run_sim", "Run Simulation"), key="btn_backtest"):
-        with st.spinner("Processing..."):  # type: ignore
+        with st.spinner("Processing..."):
             mt5_tf = tf_options[data_mode]
             df_raw = get_mt5_data(symbol, days_back, timeframe=mt5_tf)
 
@@ -207,8 +235,12 @@ def render_backtester_view(lang: str):
             contract = CONTRACT_SIZES.get(symbol, 100000)
             comm_pct = COMMISSION_USD_PER_LOT / contract
             results = run_advanced_backtest(
-                trading_data, capital, risk, slippage, strat, comm_pct, symbol=symbol
+                trading_data, capital, risk, slippage, strat,
+                comm_pct, symbol=symbol,
             )
+
+            if results.get('bankrupt'):
+                st.error("⚠️ MARGIN CALL — Account went bankrupt during simulation!")
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(t.get("stats_bars", "Analyzed Bars"), len(trading_data))
@@ -257,18 +289,21 @@ def render_backtester_view(lang: str):
 
 
 def render_alert_view(lang: str):
+    """Render the alert center tab."""
     t = load_translations(lang)
     alert_mgr = _get_alert_manager()
 
     st.sidebar.header("⚡ Alerts Config")
     webhook = st.sidebar.text_input(
-        t.get("alert_webhook", "Discord Webhook URL"), type="password", key="discord_webhook",
+        t.get("alert_webhook", "Discord Webhook URL"),
+        type="password", key="discord_webhook",
     )
     if webhook:
         alert_mgr.configure_discord(webhook)
 
     alert_mgr.enabled = st.sidebar.checkbox(
-        t.get("alert_enabled", "Enable Alerts"), value=True, key="alerts_enabled_toggle",
+        t.get("alert_enabled", "Enable Alerts"),
+        value=True, key="alerts_enabled_toggle",
     )
 
     st.sidebar.markdown("---")
@@ -285,7 +320,7 @@ def render_alert_view(lang: str):
         bus.publish_sync("TRADE_SIGNAL", {
             "symbol": "TEST",
             "message": "This is a test alert from the dashboard.",
-            "signal_type": "INFO"
+            "signal_type": "INFO",
         })
         st.success("Test alert dispatched via Event Bus!")
 
@@ -298,11 +333,12 @@ def render_alert_view(lang: str):
 
 
 def render_sentiment_view(lang: str):
+    """Render the Global Macro & Sentiment Heatmap tab."""
     st.subheader("Global Macro & Sentiment Heatmap")
     st.markdown("Powered by **FinBERT NLP** & **ForexFactory XML Feed**")
 
     if st.button("Refresh Global Data", key="btn_refresh_macro"):
-        with st.spinner("Analyzing NLP news sentiment & global calendar..."):  # type: ignore
+        with st.spinner("Analyzing NLP news sentiment & global calendar..."):
 
             nlp = SentimentEngine()
             sent_data = []
@@ -321,20 +357,24 @@ def render_sentiment_view(lang: str):
                 sent_data.append({
                     "Instrument": sym_name,
                     "FinBERT Score": score,
-                    "Regime Bias": bias
+                    "Regime Bias": bias,
                 })
 
             df_sent = pd.DataFrame(sent_data)
 
             def _color_bias(val):
-                if "BULLISH" in str(val): return "color: #00ff88; font-weight: bold"
-                if "BEARISH" in str(val): return "color: #ff4444; font-weight: bold"
+                if "BULLISH" in str(val):
+                    return "color: #00ff88; font-weight: bold"
+                if "BEARISH" in str(val):
+                    return "color: #ff4444; font-weight: bold"
                 return "color: #aaaaaa"
 
             st.markdown("### Natural Language Processing (News)")
             st.dataframe(
-                df_sent.style.map(_color_bias, subset=["Regime Bias"]).format({"FinBERT Score": "{:.2f}"}),
-                use_container_width=True
+                df_sent.style.map(
+                    _color_bias, subset=["Regime Bias"],
+                ).format({"FinBERT Score": "{:.2f}"}),
+                use_container_width=True,
             )
 
             st.markdown("---")
@@ -344,13 +384,19 @@ def render_sentiment_view(lang: str):
 
             if not events.empty:
                 ev_df = pd.DataFrame({"Event Time (Platform/MT5 Time)": events})
-                ev_df['Event Time (Platform/MT5 Time)'] = ev_df['Event Time (Platform/MT5 Time)'].dt.strftime('%Y-%m-%d %H:%M')
+                ev_df['Event Time (Platform/MT5 Time)'] = ev_df[
+                    'Event Time (Platform/MT5 Time)'
+                ].dt.strftime('%Y-%m-%d %H:%M')
                 st.dataframe(ev_df, use_container_width=True)
             else:
-                st.info("No High-Impact ('Red Folder') events detected for the remainder of this week.")
+                st.info(
+                    "No High-Impact ('Red Folder') events detected "
+                    "for the remainder of this week."
+                )
 
 
 def _render_price_chart(trading_data, results):
+    """Render candlestick price chart with trade markers."""
     st.subheader("Price & Trades")
     cutoff_date = trading_data.index.max() - timedelta(days=7)
     plot_bars = trading_data[trading_data.index >= cutoff_date].copy()
@@ -365,22 +411,17 @@ def _render_price_chart(trading_data, results):
     plot_bars['_x'] = plot_bars[time_col].astype(str)
     dupes = plot_bars['_x'].duplicated(keep=False)
     if dupes.any():
-        counts: dict = {}
-        labels = []
-        for val in plot_bars['_x']:
-            counts[val] = counts.get(val, 0) + 1
-            labels.append(f"{val} [{counts[val]}]" if counts[val] > 1 or val in [v for v, c in counts.items() if c > 0 and dupes.any()] else val)
         plot_bars['_x'] = [f"{v}.{i}" for i, v in enumerate(plot_bars['_x'])]
 
     x_strings = plot_bars['_x'].tolist()
     ts_values = plot_bars[time_col].values
 
     plot_trades = []
-    for t in results['trades_history']:
-        entry_ts = pd.Timestamp(t['entry_idx'])
-        exit_ts = pd.Timestamp(t['exit_idx'])
+    for tr in results['trades_history']:
+        entry_ts = pd.Timestamp(tr['entry_idx'])
+        exit_ts = pd.Timestamp(tr['exit_idx'])
         if entry_ts >= cutoff_date or exit_ts >= cutoff_date:
-            plot_trades.append({**t, '_entry_ts': entry_ts, '_exit_ts': exit_ts})
+            plot_trades.append({**tr, '_entry_ts': entry_ts, '_exit_ts': exit_ts})
 
     fig = go.Figure(data=[go.Candlestick(
         x=x_strings,
@@ -396,30 +437,33 @@ def _render_price_chart(trading_data, results):
             return x_strings[idx]
 
         e_lx, e_ly, e_sx, e_sy, ex_x, ex_y = [], [], [], [], [], []
-        for t in plot_trades:
-            if t['type'] == 1:
-                e_lx.append(_snap(t['_entry_ts']))
-                e_ly.append(t['entry_price'])
+        for tr in plot_trades:
+            if tr['type'] == 1:
+                e_lx.append(_snap(tr['_entry_ts']))
+                e_ly.append(tr['entry_price'])
             else:
-                e_sx.append(_snap(t['_entry_ts']))
-                e_sy.append(t['entry_price'])
-            ex_x.append(_snap(t['_exit_ts']))
-            ex_y.append(t['exit_price'])
+                e_sx.append(_snap(tr['_entry_ts']))
+                e_sy.append(tr['entry_price'])
+            ex_x.append(_snap(tr['_exit_ts']))
+            ex_y.append(tr['exit_price'])
 
         if e_lx:
             fig.add_trace(go.Scatter(
                 x=e_lx, y=e_ly, mode='markers',
-                marker=dict(symbol='triangle-up', size=12, color='lime'), name='Long',
+                marker=dict(symbol='triangle-up', size=12, color='lime'),
+                name='Long',
             ))
         if e_sx:
             fig.add_trace(go.Scatter(
                 x=e_sx, y=e_sy, mode='markers',
-                marker=dict(symbol='triangle-down', size=12, color='red'), name='Short',
+                marker=dict(symbol='triangle-down', size=12, color='red'),
+                name='Short',
             ))
         if ex_x:
             fig.add_trace(go.Scatter(
                 x=ex_x, y=ex_y, mode='markers',
-                marker=dict(symbol='x', size=8, color='yellow'), name='Exit',
+                marker=dict(symbol='x', size=8, color='yellow'),
+                name='Exit',
             ))
 
     fig.update_layout(
@@ -431,6 +475,7 @@ def _render_price_chart(trading_data, results):
 
 
 def _render_equity_chart(results, t):
+    """Render strategy vs. buy-and-hold equity curves."""
     st.subheader(t.get("equity_curve", "Equity Curve"))
     eq_fig = go.Figure()
     eq_data = results['equity_curve']
@@ -447,6 +492,7 @@ def _render_equity_chart(results, t):
 
 
 def _render_drawdown_chart(results, t):
+    """Render drawdown time-series area chart."""
     st.subheader(t.get("drawdown_chart", "Drawdown Chart"))
     dd_series = results.get('drawdown_series')
     if dd_series is None or len(dd_series) == 0:
@@ -457,11 +503,14 @@ def _render_drawdown_chart(results, t):
         fill='tozeroy', line=dict(color='#ff4444', width=1),
         fillcolor='rgba(255,68,68,0.2)', name='Drawdown %',
     ))
-    dd_fig.update_layout(template="plotly_dark", height=250, yaxis_title="Drawdown %")
+    dd_fig.update_layout(
+        template="plotly_dark", height=250, yaxis_title="Drawdown %",
+    )
     st.plotly_chart(dd_fig, use_container_width=True)
 
 
 def _render_pnl_distribution(results, t):
+    """Render per-trade PnL bar chart."""
     if not results['trades_history']:
         return
     st.subheader(t.get("trade_dist", "Trade PnL Distribution"))
@@ -474,6 +523,7 @@ def _render_pnl_distribution(results, t):
 
 
 def _render_trade_table(results, t):
+    """Render the trade log table with colour-coded PnL."""
     if not results['trades_history']:
         return
     st.subheader(t.get("trade_history", "Trade Log"))
@@ -489,8 +539,11 @@ def _render_trade_table(results, t):
         'exit_reason': t.get("col_exit_reason", "Exit Reason"),
     })
     display_cols = [
-        t.get("col_entry", "Entry"), t.get("col_exit", "Exit"), 'Entry Price', 'Exit Price',
-        t.get("col_type", "Type"), t.get("col_pnl", "PnL"), t.get("col_bars_held", "Bars Held"), t.get("col_exit_reason", "Exit Reason"),
+        t.get("col_entry", "Entry"), t.get("col_exit", "Exit"),
+        'Entry Price', 'Exit Price',
+        t.get("col_type", "Type"), t.get("col_pnl", "PnL"),
+        t.get("col_bars_held", "Bars Held"),
+        t.get("col_exit_reason", "Exit Reason"),
     ]
     existing_cols = [c for c in display_cols if c in trade_df.columns]
 
@@ -505,7 +558,14 @@ def _render_trade_table(results, t):
     )
 
 
-def _colored_metric(col, label: str, value: float, fmt: str = "{:.2f}", invert: bool = False):
+def _colored_metric(
+    col,
+    label: str,
+    value: float,
+    fmt: str = "{:.2f}",
+    invert: bool = False,
+):
+    """Render a colour-coded metric (green for positive, red for negative)."""
     formatted = fmt.format(value)
     good = value < 0 if invert else value > 0
     color = "#00ff88" if good else "#ff4444"

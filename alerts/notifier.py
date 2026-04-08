@@ -1,15 +1,24 @@
-"""Discord notifier with rate limiting, rich embeds, and alert history."""
+"""
+Discord notifier with rate limiting, rich embeds, and alert history.
+"""
 
 import time
 import logging
-import requests
 import threading
 from datetime import datetime, timezone
 
+import requests
+
 logger = logging.getLogger(__name__)
 
+
 class DiscordNotifier:
-    """Send formatted embed alerts to a Discord webhook with rate limiting."""
+    """Send formatted embed alerts to a Discord webhook with rate limiting.
+
+    Alerts are dispatched on daemon threads so the calling code is
+    never blocked by network latency. A sliding-window rate limiter
+    prevents Discord API abuse.
+    """
 
     def __init__(self, webhook_url: str, rate_limit_per_minute: int = 10):
         self.webhook_url = webhook_url
@@ -17,9 +26,18 @@ class DiscordNotifier:
         self._send_times: list[float] = []
         self.history: list[dict] = []
 
-    def send_alert(self, asset: str, message: str, signal_type: str = "INFO",
-                   confidence: float | None = None) -> bool:
-        """Send a formatted embed alert. Returns True if dispatch thread started successfully."""
+    def send_alert(
+        self,
+        asset: str,
+        message: str,
+        signal_type: str = "INFO",
+        confidence: float | None = None,
+    ) -> bool:
+        """Send a formatted embed alert via Discord webhook.
+
+        Returns ``True`` if the dispatch thread was started
+        successfully (does not guarantee delivery).
+        """
         if not self.webhook_url:
             return False
 
@@ -30,7 +48,10 @@ class DiscordNotifier:
             return False
 
         emoji = _signal_emoji(signal_type)
-        conf_str = f" | Confidence: **{confidence * 100:.1f}%**" if confidence is not None else ""
+        conf_str = (
+            f" | Confidence: **{confidence * 100:.1f}%**"
+            if confidence is not None else ""
+        )
         payload = {
             "embeds": [{
                 "title": f"{emoji} {signal_type}: {asset}",
@@ -38,7 +59,7 @@ class DiscordNotifier:
                 "color": _signal_color(signal_type),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "footer": {"text": "Institutional Quant Dashboard"},
-            }]
+            }],
         }
 
         def _async_post(payload_data):
@@ -63,17 +84,21 @@ class DiscordNotifier:
         return True
 
     def get_history(self, last_n: int = 50) -> list[dict]:
-        """Return last N alert records."""
+        """Return the last *last_n* alert records."""
         return self.history[-last_n:]
 
+
 def _signal_emoji(signal_type: str) -> str:
+    """Map signal types to Discord-friendly emoji."""
     return {
         "BULLISH_SWEEP": "🟢🔄", "BEARISH_SWEEP": "🔴🔄",
         "LONG": "🟢📈", "SHORT": "🔴📉",
         "EXIT": "⚪⏹", "INFO": "ℹ️",
     }.get(signal_type, "🚨")
 
+
 def _signal_color(signal_type: str) -> int:
+    """Map signal types to Discord embed colour codes."""
     return {
         "BULLISH_SWEEP": 0x00FF88, "BEARISH_SWEEP": 0xFF4444,
         "LONG": 0x00CC66, "SHORT": 0xCC3333,

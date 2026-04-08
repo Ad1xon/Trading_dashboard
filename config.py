@@ -1,11 +1,16 @@
-# config.py
-"""Project configuration — symbols, defaults, magic numbers."""
+"""
+Project configuration — symbols, defaults, trading constants, ML hyperparameters.
+"""
 
 import json
 import os
 
+
 def load_translations(lang_code: str) -> dict:
-    """Load JSON i18n file based on language code ('EN' or 'PL')."""
+    """Load JSON i18n file based on language code ('EN' or 'PL').
+
+    Falls back to English if the requested locale file is missing or corrupt.
+    """
     base_dir = os.path.dirname(__file__)
     file_path = os.path.join(base_dir, 'locales', f'{lang_code.lower()}.json')
     try:
@@ -41,6 +46,8 @@ MFE_ACTIVATION_MULTIPLIER = 1.0
 MFE_TRAIL_PCT = 0.5
 DEFAULT_MAX_HOLDING = 100
 BARS_PER_YEAR = 252
+
+MAX_ALLOWED_LOTS = 50.0
 
 XGB_N_ESTIMATORS = 150
 XGB_MAX_DEPTH = 3

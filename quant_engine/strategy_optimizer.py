@@ -1,13 +1,21 @@
+"""
+Strategy optimiser — grid search, walk-forward optimisation,
+and Monte Carlo simulation.
+"""
+
 import itertools
+from typing import Type
+
 import numpy as np
 import pandas as pd
-from typing import Type
+
 from .strategies.base import BaseStrategy
 from .backtester import run_advanced_backtest
 
+
 def grid_search(
     strategy_cls: Type[BaseStrategy],
-    range_bars: pd.DataFrame,
+    trading_data: pd.DataFrame,
     initial_capital: float,
     risk_percent: float,
     slippage: float,
@@ -16,6 +24,25 @@ def grid_search(
     metric: str = 'sharpe_ratio',
     top_n: int = 10,
 ) -> list[dict]:
+    """Exhaustive parameter grid search ranked by a target metric.
+
+    Args:
+        strategy_cls:   Strategy class to instantiate.
+        trading_data:   OHLCV or range-bar DataFrame.
+        initial_capital: Starting equity.
+        risk_percent:   Fraction risked per trade.
+        slippage:       Slippage in price units.
+        commission_pct: Commission as a fraction.
+        param_grid:     ``{param_name: [values]}`` or ``None`` for
+                        auto-generated ranges from the strategy's
+                        ``params`` class attribute.
+        metric:         Key from the backtest results dict to optimise.
+        top_n:          Number of best results to return.
+
+    Returns:
+        Sorted list of result dicts (best first), each containing
+        ``params`` and all scalar backtest metrics.
+    """
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
@@ -27,9 +54,15 @@ def grid_search(
         kwargs = dict(zip(keys, combo))
         try:
             strat = strategy_cls(**kwargs)
-            bt = run_advanced_backtest(range_bars, initial_capital, risk_percent, slippage, strat, commission_pct)
+            bt = run_advanced_backtest(
+                trading_data, initial_capital, risk_percent,
+                slippage, strat, commission_pct,
+            )
             record = {'params': kwargs}
-            record.update({k: v for k, v in bt.items() if k not in ('equity_curve', 'trades_history', 'drawdown_series')})
+            record.update({
+                k: v for k, v in bt.items()
+                if k not in ('equity_curve', 'trades_history', 'drawdown_series')
+            })
             results.append(record)
         except Exception:
             continue
@@ -37,7 +70,12 @@ def grid_search(
     results.sort(key=lambda x: x.get(metric, -999), reverse=True)
     return results[:top_n]
 
+
 def _auto_grid(strategy_cls: Type[BaseStrategy]) -> dict:
+    """Generate a parameter grid from the strategy's ``params`` class attribute.
+
+    Each param tuple is ``(default, lo, hi, step)``.
+    """
     grid = {}
     for name, (default, lo, hi, step) in strategy_cls.params.items():
         if isinstance(default, int):
@@ -46,9 +84,10 @@ def _auto_grid(strategy_cls: Type[BaseStrategy]) -> dict:
             grid[name] = list(np.arange(lo, hi + step / 2, step))
     return grid
 
+
 def walk_forward_optimization(
     strategy_cls: Type[BaseStrategy],
-    range_bars: pd.DataFrame,
+    trading_data: pd.DataFrame,
     initial_capital: float,
     risk_percent: float,
     slippage: float,
@@ -59,10 +98,21 @@ def walk_forward_optimization(
     metric: str = 'sharpe_ratio',
     indicator_warmup: int = 120,
 ) -> dict:
+    """Walk-forward optimisation with in-sample optimisation and
+    out-of-sample validation on each fold.
+
+    Each fold optimises params on the training slice and evaluates
+    them on the test slice.  An indicator warm-up overlap is included
+    so that the first test bars have fully computed indicators.
+
+    Returns:
+        Dict with ``oos_results`` (list of per-fold metrics) and
+        ``best_params_per_fold``.
+    """
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 
-    n = len(range_bars)
+    n = len(trading_data)
     fold_size = n // n_splits
     oos_results = []
     best_params_per_fold = []
@@ -75,9 +125,9 @@ def walk_forward_optimization(
         if train_end - fold_start < 50 or fold_end - train_end < 20:
             continue
 
-        train_data = range_bars.iloc[fold_start:train_end].copy()
+        train_data = trading_data.iloc[fold_start:train_end].copy()
         warmup_start = max(fold_start, train_end - indicator_warmup)
-        test_data_with_warmup = range_bars.iloc[warmup_start:fold_end].copy()
+        test_data_with_warmup = trading_data.iloc[warmup_start:fold_end].copy()
 
         is_results = grid_search(
             strategy_cls, train_data, initial_capital,
@@ -96,11 +146,18 @@ def walk_forward_optimization(
             test_data_with_warmup, initial_capital,
             risk_percent, slippage, strat, commission_pct,
         )
-        oos_record = {k: v for k, v in oos_bt.items() if k not in ('equity_curve', 'trades_history', 'drawdown_series')}
+        oos_record = {
+            k: v for k, v in oos_bt.items()
+            if k not in ('equity_curve', 'trades_history', 'drawdown_series')
+        }
         oos_record['fold'] = fold
         oos_results.append(oos_record)
 
-    return {'oos_results': oos_results, 'best_params_per_fold': best_params_per_fold}
+    return {
+        'oos_results': oos_results,
+        'best_params_per_fold': best_params_per_fold,
+    }
+
 
 def monte_carlo_simulation(
     trades_history: list,
@@ -108,6 +165,16 @@ def monte_carlo_simulation(
     n_simulations: int = 1000,
     confidence_levels: tuple = (0.05, 0.25, 0.50, 0.75, 0.95),
 ) -> dict:
+    """Bootstrap Monte Carlo simulation of trade-sequence risk.
+
+    Randomly resamples the trade PnL sequence ``n_simulations`` times
+    and computes terminal equity / max drawdown percentiles plus the
+    probability of ruin (equity reaching zero).
+
+    Returns:
+        Dict with ``terminal_equity_percentiles``,
+        ``max_drawdown_percentiles``, ``ruin_probability``.
+    """
     if not trades_history:
         return {
             'terminal_equity_percentiles': {},
@@ -126,14 +193,22 @@ def monte_carlo_simulation(
         shuffled = rng.choice(pnls, size=n_trades, replace=True)
         equity_path = initial_capital + np.cumsum(shuffled)
         terminal_equities[sim] = equity_path[-1]
-        running_max = np.maximum.accumulate(np.concatenate([[initial_capital], equity_path]))
+        running_max = np.maximum.accumulate(
+            np.concatenate([[initial_capital], equity_path]),
+        )
         dd = (np.concatenate([[initial_capital], equity_path]) / running_max) - 1
         max_drawdowns[sim] = dd.min()
         if np.any(equity_path <= 0):
             ruin_count += 1
 
-    eq_pct = {f'{int(c * 100)}%': np.percentile(terminal_equities, c * 100) for c in confidence_levels}
-    dd_pct = {f'{int(c * 100)}%': np.percentile(max_drawdowns, c * 100) for c in confidence_levels}
+    eq_pct = {
+        f'{int(c * 100)}%': np.percentile(terminal_equities, c * 100)
+        for c in confidence_levels
+    }
+    dd_pct = {
+        f'{int(c * 100)}%': np.percentile(max_drawdowns, c * 100)
+        for c in confidence_levels
+    }
 
     return {
         'terminal_equity_percentiles': eq_pct,
