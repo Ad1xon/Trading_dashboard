@@ -1,17 +1,17 @@
-# quant_engine/strategies/arabian_scalper.py
-"""Arabian Scalper with Institutional Risk Management (Asymmetric 1:3 R:R)."""
+"""Arabian Scalper with Risk Management (1:3 R:R)."""
 
 import pandas as pd
 import numpy as np
 from .base import BaseStrategy
 from ..indicators import calculate_atr, calculate_supertrend, calculate_weis_wave_volume
 from ..ml_models import LGBMRangeBarModel
+from data_feed.nlp_engine import SentimentEngine
 
 
 class ArabianScalper(BaseStrategy):
     """
-    Arabian Scalper with Institutional Risk Management (Asymmetric 1:3 R:R).
-    Uses LightGBM for signal confirmation.
+    Arabian Scalper with Risk Management (1:3 R:R).
+    Uses LightGBM for signal confirmation + Macro/NLP integration.
     """
     params = {
         'lookback': (10, 5, 20, 1),
@@ -21,13 +21,17 @@ class ArabianScalper(BaseStrategy):
     }
 
     def __init__(self, lookback=10, prob_threshold=0.60, risk_atr_cap=1.5, reward_multiplier=3.0):
+        super().__init__()
         self.lookback = lookback
         self.prob_threshold = prob_threshold
         self.risk_atr_cap = risk_atr_cap
         self.reward_multiplier = reward_multiplier
         self.ml_model = LGBMRangeBarModel(tp_mult=reward_multiplier, sl_mult=risk_atr_cap)
+        self.nlp = SentimentEngine()
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self.nlp.apply_sentiment_to_dataframe(df, "Market")
+
         df['ATR'] = calculate_atr(df, 14)
         df['Momentum'] = df['Close'].diff(self.lookback)
         df['Vol_Surge'] = df['Volume'] > df['Volume'].rolling(20).mean() * 1.5
@@ -55,6 +59,8 @@ class ArabianScalper(BaseStrategy):
         df['Signal'] = 0
         df.loc[bull_signal & (df['LGBM_Prob'] > self.prob_threshold), 'Signal'] = 1
         df.loc[bear_signal & (df['LGBM_Prob'] < (1 - self.prob_threshold)), 'Signal'] = -1
+
+        df = self.apply_macro_filter(df)
 
         df['SL_Price'] = np.nan
         df['TP_Price'] = np.nan

@@ -1,6 +1,7 @@
 """XGBoost model and Walk-Forward caching engine."""
 
 import os
+import warnings
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -60,7 +61,9 @@ def _cached_walk_forward_train(
     dummy_instance = XGBoostRangeBarModel(tp_mult=tp_mult, sl_mult=sl_mult)
     data = dummy_instance.build_features(df)
     data['Target'] = dummy_instance._build_mfe_target(data)
-    valid_mask = data[feature_cols + ['Target']].notna().all(axis=1)
+
+    actual_features = [c for c in feature_cols if c in data.columns]
+    valid_mask = data[actual_features + ['Target']].notna().all(axis=1)
     data = data.loc[valid_mask].copy()
 
     n = len(data)
@@ -68,35 +71,39 @@ def _cached_walk_forward_train(
     if initial_train_end < 30:
         return None, None, {}, []
 
-    X_all = data[feature_cols].values
-    y_all = data['Target'].values
+    X_all = data[actual_features]
+    y_all = data['Target']
     predictions = np.full(n, np.nan)
     cursor = initial_train_end
 
-    while cursor < n:
-        segment_end = min(cursor + refit_every, n)
-        train_end_purged = max(0, cursor - horizon)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
 
-        if train_end_purged > 0:
-            X_train_sub = X_all[:train_end_purged]
-            y_train_sub = y_all[:train_end_purged]
-            model.fit(X_train_sub, y_train_sub)
-            predictions[cursor:segment_end] = model.predict_proba(X_all[cursor:segment_end])[:, 1]
+        while cursor < n:
+            segment_end = min(cursor + refit_every, n)
+            train_end_purged = max(0, cursor - horizon)
 
-        cursor = segment_end
+            if train_end_purged > 0:
+                X_train_sub = X_all.iloc[:train_end_purged]
+                y_train_sub = y_all.iloc[:train_end_purged]
+                model.fit(X_train_sub, y_train_sub)
+                predictions[cursor:segment_end] = model.predict_proba(X_all.iloc[cursor:segment_end])[:, 1]
 
-    data['WF_Prediction'] = predictions
-    feature_importances = dict(zip(feature_cols, model.feature_importances_))
+            cursor = segment_end
 
-    tscv = TimeSeriesSplit(n_splits=5)
-    cv_scores = []
-    X_train_init = X_all[:initial_train_end]
-    y_train_init = y_all[:initial_train_end]
-    for train_idx, val_idx in tscv.split(X_train_init):
-        if len(train_idx) < 20:
-            continue
-        model.fit(X_train_init[train_idx], y_train_init[train_idx])
-        cv_scores.append(accuracy_score(y_train_init[val_idx], model.predict(X_train_init[val_idx])))
+        data['WF_Prediction'] = predictions
+        feature_importances = dict(zip(actual_features, model.feature_importances_))
+
+        tscv = TimeSeriesSplit(n_splits=5)
+        cv_scores = []
+        X_train_init = X_all.iloc[:initial_train_end]
+        y_train_init = y_all.iloc[:initial_train_end]
+
+        for train_idx, val_idx in tscv.split(X_train_init):
+            if len(train_idx) < 20:
+                continue
+            model.fit(X_train_init.iloc[train_idx], y_train_init.iloc[train_idx])
+            cv_scores.append(accuracy_score(y_train_init.iloc[val_idx], model.predict(X_train_init.iloc[val_idx])))
 
     return data, model, feature_importances, cv_scores
 
@@ -108,6 +115,7 @@ class XGBoostRangeBarModel:
         'Dir_Sum_5', 'Vol_Ratio', 'Close_Diff', 'Variance_Ratio',
         'RSI_14', 'ATR_14', 'BB_PctB', 'BB_Width',
         'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
+        'Sentiment_Score'
     ]
 
     def __init__(self, tp_mult: float = XGB_TP_MULT, sl_mult: float = XGB_SL_MULT):
@@ -147,6 +155,10 @@ class XGBoostRangeBarModel:
         data['Volume_Delta'] = calculate_orderflow_proxy(data)
         data['Return_Autocorr'] = calculate_return_autocorrelation(data['Close'], 20, 1)
         data['Return_5'] = np.log(data['Close'] / data['Close'].shift(5).clip(lower=1e-10))
+
+        if 'Sentiment_Score' not in data.columns:
+            data['Sentiment_Score'] = 0.0
+
         return data
 
     def _build_mfe_target(self, data: pd.DataFrame) -> np.ndarray:
@@ -203,29 +215,26 @@ class XGBoostRangeBarModel:
         self.is_trained = True
         return data
 
-    def _run_cv(self, X: np.ndarray, y: np.ndarray, n_splits: int = 5):
-        """TimeSeriesSplit cross-validation on the training portion."""
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-        scores = []
-        for train_idx, val_idx in tscv.split(X):
-            if len(train_idx) < 20:
-                continue
-            self.model.fit(X[train_idx], y[train_idx])
-            scores.append(accuracy_score(y[val_idx], self.model.predict(X[val_idx])))
-        self.cv_scores_ = scores
-
     def predict_proba(self, df_features: pd.DataFrame) -> np.ndarray:
         """Return bullish probability for each row."""
         if 'WF_Prediction' in df_features.columns:
             return df_features['WF_Prediction'].fillna(0.5).values
         if not self.is_trained:
             return np.full(len(df_features), 0.5)
-        available = [c for c in self.FEATURE_COLS if c in df_features.columns]
-        if len(available) < len(self.FEATURE_COLS):
-            return np.full(len(df_features), 0.5)
+
+        actual_features = [c for c in self.FEATURE_COLS if c in df_features.columns]
+        if len(actual_features) < len(self.FEATURE_COLS):
+            for col in self.FEATURE_COLS:
+                if col not in df_features.columns:
+                    df_features[col] = 0.0
+
         X = df_features[self.FEATURE_COLS]
         X = X.ffill().fillna(0)
-        return self.model.predict_proba(X.values)[:, 1]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Podajemy DataFrame (X) zamiast macierzy NumPy (X.values)
+            return self.model.predict_proba(X)[:, 1]
 
     def get_feature_importance(self) -> dict:
         """Feature importances sorted descending."""

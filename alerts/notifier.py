@@ -3,10 +3,10 @@
 import time
 import logging
 import requests
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
-
 
 class DiscordNotifier:
     """Send formatted embed alerts to a Discord webhook with rate limiting."""
@@ -19,7 +19,7 @@ class DiscordNotifier:
 
     def send_alert(self, asset: str, message: str, signal_type: str = "INFO",
                    confidence: float | None = None) -> bool:
-        """Send a formatted embed alert. Returns True if sent successfully."""
+        """Send a formatted embed alert. Returns True if dispatch thread started successfully."""
         if not self.webhook_url:
             return False
 
@@ -36,26 +36,22 @@ class DiscordNotifier:
                 "title": f"{emoji} {signal_type}: {asset}",
                 "description": f"{message}{conf_str}",
                 "color": _signal_color(signal_type),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "footer": {"text": "Institutional Quant Dashboard"},
             }]
         }
 
-        import threading
-        
         def _async_post(payload_data):
             try:
-                resp = requests.post(self.webhook_url, json=payload_data, timeout=5)
-                success = resp.status_code in (200, 204)
+                requests.post(self.webhook_url, json=payload_data, timeout=5)
             except Exception as exc:
                 logger.error("Discord send failed: %s", exc)
-                success = False
 
         threading.Thread(target=_async_post, args=(payload,), daemon=True).start()
 
         self._send_times.append(now)
         self.history.append({
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "asset": asset,
             "signal_type": signal_type,
             "message": message,
@@ -63,12 +59,12 @@ class DiscordNotifier:
         })
         if len(self.history) > 500:
             self.history = self.history[-500:]
-        return success
+
+        return True
 
     def get_history(self, last_n: int = 50) -> list[dict]:
         """Return last N alert records."""
         return self.history[-last_n:]
-
 
 def _signal_emoji(signal_type: str) -> str:
     return {
@@ -76,7 +72,6 @@ def _signal_emoji(signal_type: str) -> str:
         "LONG": "🟢📈", "SHORT": "🔴📉",
         "EXIT": "⚪⏹", "INFO": "ℹ️",
     }.get(signal_type, "🚨")
-
 
 def _signal_color(signal_type: str) -> int:
     return {

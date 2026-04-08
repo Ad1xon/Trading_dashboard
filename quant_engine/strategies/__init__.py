@@ -5,6 +5,7 @@ from .reversion import ZScoreMeanReversion, MLBounceReversion, VWAPBounceStrateg
 from .breakout import VolatilityBreakout, MLVolatilityBreakout
 from .arabian_scalper import ArabianScalper
 from .detectors import detect_liquidity_sweep, analyze_pair_opportunity
+from .lstm_swing import LSTMSwingStrategy
 
 STRATEGY_REGISTRY = {
     'ZScore Rev': ZScoreMeanReversion,
@@ -14,4 +15,5 @@ STRATEGY_REGISTRY = {
     'VWAP Bounce': VWAPBounceStrategy,
     'MTF Momentum': MultiTimeframeMomentum,
     'LGBM Arab Scalp': ArabianScalper,
+    'LSTM Swing': LSTMSwingStrategy,
 }
