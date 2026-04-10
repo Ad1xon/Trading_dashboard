@@ -11,6 +11,8 @@ from data_feed.nlp_engine import SentimentEngine
 class ArabianScalper(BaseStrategy):
     """Arabian Scalper — momentum + volume surge with LGBM confirmation."""
 
+    strategy_type = "scalp"
+
     params = {
         'lookback': (10, 5, 20, 1),
         'prob_threshold': (0.60, 0.50, 0.70, 0.05),
@@ -35,7 +37,7 @@ class ArabianScalper(BaseStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate scalp signals with LGBM, NLP, and macro filters."""
-        df = self.nlp.apply_sentiment_to_dataframe(df, "Market")
+        df = self.nlp.apply_rolling_sentiment(df, "Market")
 
         df['ATR'] = calculate_atr(df, 14)
         df['Std'] = df['Close'].rolling(20).std()

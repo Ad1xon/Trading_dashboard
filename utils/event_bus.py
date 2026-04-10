@@ -35,7 +35,7 @@ class EventBus:
         await self._queue.put({"topic": topic, "data": data})
 
     def publish_sync(self, topic: str, data: dict):
-        """Publish an event synchronously (e."""
+        """Publish an event synchronously from non-async contexts."""
         for cb in self._subscribers.get(topic, []):
             if asyncio.iscoroutinefunction(cb):
                 try:

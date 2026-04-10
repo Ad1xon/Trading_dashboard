@@ -115,8 +115,11 @@ class TestVolatilityBreakout:
 
 class TestStrategyRegistry:
     def test_registry_complete(self):
-        expected = {'ZScoreMeanReversion', 'VolatilityBreakout', 'MLVolatilityBreakout',
-                    'MLBounceReversion', 'VWAPBounceStrategy', 'MultiTimeframeMomentum'}
+        expected = {
+            'ZScore Rev', 'SMC Breakout', 'XGB Breakout',
+            'XGB Bounce', 'VWAP Bounce', 'MTF Momentum',
+            'LGBM Arab Scalp', 'LSTM Swing',
+        }
         assert set(STRATEGY_REGISTRY.keys()) == expected
 
     def test_registry_instantiation(self):

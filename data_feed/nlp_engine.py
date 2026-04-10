@@ -1,10 +1,12 @@
-"""NLP Sentiment Engine — FinBERT-based financial news analysis."""
+"""NLP Sentiment Engine — FinBERT-based financial news analysis with rolling window support."""
 
 import logging
 
 import feedparser
 import pandas as pd
 import numpy as np
+
+from config import SENTIMENT_ROLLING_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ class SentimentEngine:
         df: pd.DataFrame,
         symbol: str,
     ) -> pd.DataFrame:
-        """Apply the current sentiment score to the last bar of *df*."""
+        """Apply the current sentiment score to the last bar of *df* (legacy)."""
         df = df.copy()
         if 'Sentiment_Score' not in df.columns:
             df['Sentiment_Score'] = 0.0
@@ -88,4 +90,22 @@ class SentimentEngine:
         current_sentiment = self.fetch_rss_sentiment(symbol)
         if len(df) > 0:
             df.iloc[-1, df.columns.get_loc('Sentiment_Score')] = current_sentiment
+        return df
+
+    def apply_rolling_sentiment(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        window_bars: int = SENTIMENT_ROLLING_WINDOW,
+    ) -> pd.DataFrame:
+        """Forward-fill sentiment across a rolling window to simulate persistent regime."""
+        df = df.copy()
+        if 'Sentiment_Score' not in df.columns:
+            df['Sentiment_Score'] = 0.0
+
+        current_sentiment = self.fetch_rss_sentiment(symbol)
+        if len(df) > 0 and current_sentiment != 0.0:
+            fill_start = max(0, len(df) - window_bars)
+            df.iloc[fill_start:, df.columns.get_loc('Sentiment_Score')] = current_sentiment
+
         return df

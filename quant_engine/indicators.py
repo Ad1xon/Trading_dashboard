@@ -4,20 +4,76 @@ import pandas as pd
 import numpy as np
 
 
-def calculate_vwap_with_bands(df: pd.DataFrame, window: int = 200) -> pd.DataFrame:
-    """Rolling anchored VWAP with ±2σ bands."""
+def calculate_vwap_with_bands(
+    df: pd.DataFrame,
+    window: int = 200,
+    session_reset: str | None = None,
+) -> pd.DataFrame:
+    """Rolling anchored VWAP with ±2σ bands, optionally resetting at session boundaries."""
     df = df.copy()
     df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
     df['VP'] = df['Typical_Price'] * df['Volume']
-    roll_vp = df['VP'].rolling(window=window, min_periods=1).sum()
-    roll_vol = df['Volume'].rolling(window=window, min_periods=1).sum()
-    df['VWAP'] = roll_vp / (roll_vol + 1e-10)
-    price_diff_sq = ((df['Typical_Price'] - df['VWAP']) ** 2) * df['Volume']
-    roll_diff_sq = price_diff_sq.rolling(window=window, min_periods=1).sum()
-    df['VWAP_Std'] = np.sqrt(roll_diff_sq / (roll_vol + 1e-10))
+
+    if session_reset is not None and isinstance(df.index, pd.DatetimeIndex):
+        session_groups = _detect_session_groups(df.index, session_reset)
+        roll_vp = df.groupby(session_groups)['VP'].cumsum()
+        roll_vol = df.groupby(session_groups)['Volume'].cumsum()
+        df['VWAP'] = roll_vp / (roll_vol + 1e-10)
+        price_diff_sq = ((df['Typical_Price'] - df['VWAP']) ** 2) * df['Volume']
+        roll_diff_sq = df.groupby(session_groups).apply(
+            lambda g: g[['Typical_Price', 'Volume']].assign(
+                pds=((g['Typical_Price'] - (g['VP'].cumsum() / (g['Volume'].cumsum() + 1e-10))) ** 2) * g['Volume']
+            )['pds'].cumsum()
+        )
+        if hasattr(roll_diff_sq, 'droplevel'):
+            roll_diff_sq = roll_diff_sq.droplevel(0)
+        roll_diff_sq = roll_diff_sq.reindex(df.index, fill_value=0)
+        df['VWAP_Std'] = np.sqrt(roll_diff_sq / (roll_vol + 1e-10))
+    else:
+        roll_vp = df['VP'].rolling(window=window, min_periods=1).sum()
+        roll_vol = df['Volume'].rolling(window=window, min_periods=1).sum()
+        df['VWAP'] = roll_vp / (roll_vol + 1e-10)
+        price_diff_sq = ((df['Typical_Price'] - df['VWAP']) ** 2) * df['Volume']
+        roll_diff_sq = price_diff_sq.rolling(window=window, min_periods=1).sum()
+        df['VWAP_Std'] = np.sqrt(roll_diff_sq / (roll_vol + 1e-10))
+
     df['VWAP_Upper_2'] = df['VWAP'] + (2 * df['VWAP_Std'])
     df['VWAP_Lower_2'] = df['VWAP'] - (2 * df['VWAP_Std'])
     return df
+
+
+def _detect_session_groups(index: pd.DatetimeIndex, session: str) -> pd.Series:
+    """Assign a session group ID to each bar based on session open boundaries."""
+    session_hours = {
+        "asian": 0,
+        "london": 8,
+        "new_york": 13,
+    }
+    reset_hour = session_hours.get(session.lower(), 8)
+    hours = index.hour
+    dates = index.date
+    groups = pd.Series(0, index=index)
+    group_id = 0
+    prev_in_session = False
+
+    for i in range(len(index)):
+        at_reset = hours[i] == reset_hour
+        crossed_midnight = i > 0 and dates[i] != dates[i - 1]
+        if at_reset and not prev_in_session:
+            group_id += 1
+            prev_in_session = True
+        elif crossed_midnight and not at_reset:
+            prev_in_session = False
+        elif hours[i] != reset_hour:
+            prev_in_session = False
+        groups.iloc[i] = group_id
+
+    return groups
+
+
+def calculate_session_vwap(df: pd.DataFrame, session: str = "london") -> pd.DataFrame:
+    """VWAP that resets at the specified session boundary."""
+    return calculate_vwap_with_bands(df, session_reset=session)
 
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:

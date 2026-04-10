@@ -4,23 +4,37 @@ import pandas as pd
 from abc import ABC, abstractmethod
 from config import DEFAULT_MAX_HOLDING, MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT
 from ..macro_filter import MacroFilter
+from ..regime_detector import RegimeDetector
 
 
 class BaseStrategy(ABC):
     """Abstract base class for trading strategies."""
 
     params: dict = {}
+    strategy_type: str = "trend"
 
     def __init__(self):
         self.macro_filter = MacroFilter()
+        self.regime_detector = RegimeDetector()
 
     @abstractmethod
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Produce ``Signal``, ``SL_Price``, ``TP_Price``, ``Max_Hold``         columns on the input DataFrame."""
+        """Produce ``Signal``, ``SL_Price``, ``TP_Price``, ``Max_Hold`` columns on the input DataFrame."""
 
     def apply_macro_filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """Zero-out signals within ±N minutes of high-impact macro releases."""
         return self.macro_filter.apply_blackout_mask(df)
+
+    def apply_regime_filter(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Zero-out signals during unfavourable market regimes."""
+        if "Signal" not in df.columns:
+            return df
+        df = self.regime_detector.add_regime_column(df)
+        unfavourable = df["Regime"].apply(
+            lambda r: not self.regime_detector.is_favourable(r, self.strategy_type)
+        )
+        df.loc[unfavourable, "Signal"] = 0
+        return df
 
     def get_params(self) -> dict:
         """Return current parameter values as a flat dict."""

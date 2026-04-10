@@ -10,6 +10,8 @@ from ..ml_models import XGBoostRangeBarModel
 class VolatilityBreakout(BaseStrategy):
     """Breakout above rolling high/low with volume, trend, and ATR confirmation."""
 
+    strategy_type = "trend"
+
     params = {
         'lookback': (20, 10, 40, 5),
         'vol_mult': (1.5, 1.0, 3.0, 0.25),
@@ -60,6 +62,8 @@ class VolatilityBreakout(BaseStrategy):
         df.loc[long_cond, 'Signal'] = 1
         df.loc[short_cond, 'Signal'] = -1
 
+        df = self.apply_regime_filter(df)
+
         highest = df['High'].rolling(window=self.lookback).max()
         lowest = df['Low'].rolling(window=self.lookback).min()
         df['Exit_Long'] = df['Close'] < (highest - self.atr_trail_mult * atr)
@@ -75,6 +79,8 @@ class VolatilityBreakout(BaseStrategy):
 
 class MLVolatilityBreakout(BaseStrategy):
     """ML-enhanced breakout — walk-forward XGBoost probability filter."""
+
+    strategy_type = "trend"
 
     params = {
         'lookback': (20, 10, 40, 5),
@@ -138,6 +144,8 @@ class MLVolatilityBreakout(BaseStrategy):
         df['Signal'] = 0
         df.loc[bull_breakout & (df['Bull_Prob'] > self.prob_threshold), 'Signal'] = 1
         df.loc[bear_breakout & (df['Bull_Prob'] < (1 - self.prob_threshold)), 'Signal'] = -1
+
+        df = self.apply_regime_filter(df)
 
         highest = df['High'].rolling(window=self.lookback).max()
         lowest = df['Low'].rolling(window=self.lookback).min()

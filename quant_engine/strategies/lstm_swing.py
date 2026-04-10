@@ -10,6 +10,8 @@ from ..indicators import calculate_atr
 class LSTMSwingStrategy(BaseStrategy):
     """Swing trading strategy driven by an LSTM neural network."""
 
+    strategy_type = "momentum"
+
     params = {
         'prob_threshold': (0.65, 0.50, 0.80, 0.05),
         'atr_sl_mult': (2.0, 1.0, 4.0, 0.5),

@@ -256,7 +256,13 @@ def render_backtester_view(lang: str):
             _colored_metric(c9, t.get("stats_calmar", "Calmar Ratio"), results['calmar_ratio'], fmt="{:.2f}")
             c10.metric(t.get("stats_avg_wl", "Avg Win/Loss Ratio"), f"{results['avg_win_loss_ratio']:.2f}")
             c11.metric(t.get("stats_max_consec_loss", "Max Consec. Losses"), results['max_consecutive_losses'])
-            c12.metric("", "")
+            _colored_metric(c12, "VaR (95%)", results.get('var_95', 0.0) * 100, fmt="{:.3f}%", invert=True)
+
+            c13, c14, c15, c16 = st.columns(4)
+            _colored_metric(c13, "CVaR (95%)", results.get('cvar_95', 0.0) * 100, fmt="{:.3f}%", invert=True)
+            c14.metric("", "")
+            c15.metric("", "")
+            c16.metric("", "")
 
             _render_price_chart(trading_data, results)
             _render_equity_chart(results, t)

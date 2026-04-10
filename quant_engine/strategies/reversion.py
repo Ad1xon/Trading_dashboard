@@ -13,6 +13,8 @@ from ..ml_models import XGBoostRangeBarModel
 class ZScoreMeanReversion(BaseStrategy):
     """Mean-reversion on Z-score extremes with RSI and ADX regime filter."""
 
+    strategy_type = "reversion"
+
     params = {
         'z_window': (20, 10, 60, 5),
         'z_entry': (2.0, 1.5, 3.0, 0.25),
@@ -64,6 +66,8 @@ class ZScoreMeanReversion(BaseStrategy):
         df.loc[long_cond, 'Signal'] = 1
         df.loc[short_cond, 'Signal'] = -1
 
+        df = self.apply_regime_filter(df)
+
         df['Exit_Long'] = df['Z_Score'] > 0
         df['Exit_Short'] = df['Z_Score'] < 0
 
@@ -77,6 +81,8 @@ class ZScoreMeanReversion(BaseStrategy):
 
 class MLBounceReversion(BaseStrategy):
     """Bollinger Band bounce with XGBoost directional-bias confirmation."""
+
+    strategy_type = "reversion"
 
     params = {
         'bb_period': (20, 10, 40, 5),
@@ -137,6 +143,8 @@ class MLBounceReversion(BaseStrategy):
         df.loc[bull_bounce & (df['Bull_Prob'] > self.prob_threshold), 'Signal'] = 1
         df.loc[bear_bounce & (df['Bull_Prob'] < (1 - self.prob_threshold)), 'Signal'] = -1
 
+        df = self.apply_regime_filter(df)
+
         df['Exit_Long'] = df['Close'] > bb['BB_Mid']
         df['Exit_Short'] = df['Close'] < bb['BB_Mid']
 
@@ -157,7 +165,9 @@ class MLBounceReversion(BaseStrategy):
 
 
 class VWAPBounceStrategy(BaseStrategy):
-    """VWAP ±2σ band bounce with RSI and volume confirmation."""
+    """VWAP ±2σ band bounce with RSI and volume confirmation, session-reset aware."""
+
+    strategy_type = "reversion"
 
     params = {
         'vol_mult': (1.5, 1.0, 3.0, 0.25),
@@ -185,9 +195,17 @@ class VWAPBounceStrategy(BaseStrategy):
         self.atr_tp_mult = atr_tp_mult
         self.max_holding = max_holding
 
+    def _is_intraday(self, df: pd.DataFrame) -> bool:
+        """Detect intraday data by checking median bar interval."""
+        if not isinstance(df.index, pd.DatetimeIndex) or len(df) < 2:
+            return False
+        median_delta = pd.Series(df.index).diff().dropna().median()
+        return median_delta < pd.Timedelta(hours=4)
+
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Generate VWAP-bounce signals with ATR-based SL/TP."""
-        df = calculate_vwap_with_bands(df)
+        """Generate VWAP-bounce signals with session-reset VWAP for intraday data."""
+        session_reset = "london" if self._is_intraday(df) else None
+        df = calculate_vwap_with_bands(df, session_reset=session_reset)
         df['RSI'] = calculate_rsi(df['Close'], 14)
         atr = calculate_atr(df, 14)
         df['ATR'] = atr
@@ -205,6 +223,8 @@ class VWAPBounceStrategy(BaseStrategy):
         df.loc[long_cond, 'Signal'] = 1
         df.loc[short_cond, 'Signal'] = -1
 
+        df = self.apply_regime_filter(df)
+
         df['Exit_Long'] = df['Close'] >= df['VWAP']
         df['Exit_Short'] = df['Close'] <= df['VWAP']
 
@@ -220,6 +240,8 @@ class VWAPBounceStrategy(BaseStrategy):
 
 class MultiTimeframeMomentum(BaseStrategy):
     """Trend on slow MA, entry on fast-RSI pullback."""
+
+    strategy_type = "momentum"
 
     params = {
         'slow_ma': (100, 50, 200, 25),
@@ -263,6 +285,8 @@ class MultiTimeframeMomentum(BaseStrategy):
         df['Signal'] = 0
         df.loc[long_cond, 'Signal'] = 1
         df.loc[short_cond, 'Signal'] = -1
+
+        df = self.apply_regime_filter(df)
 
         highest = df['High'].rolling(window=20).max()
         lowest = df['Low'].rolling(window=20).min()

@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 import xgboost as xgb
 import lightgbm as lgb
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score
 from numpy.lib.stride_tricks import sliding_window_view
 from joblib import Memory
@@ -20,6 +19,7 @@ from ..indicators import (
 from config import (
     XGB_N_ESTIMATORS, XGB_MAX_DEPTH, XGB_LEARNING_RATE,
     XGB_REFIT_EVERY, XGB_HORIZON, XGB_TP_MULT, XGB_SL_MULT,
+    XGB_EARLY_STOPPING_ROUNDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,16 @@ def _cached_walk_forward_train(
             if train_end_purged > 0:
                 X_train_sub = X_all.iloc[:train_end_purged]
                 y_train_sub = y_all.iloc[:train_end_purged]
-                model.fit(X_train_sub, y_train_sub)
+                eval_start = max(0, train_end_purged - int(train_end_purged * 0.15))
+                X_eval = X_all.iloc[eval_start:train_end_purged]
+                y_eval = y_all.iloc[eval_start:train_end_purged]
+                fit_params = {'verbose': False}
+                if model_type == 'xgboost':
+                    fit_params['eval_set'] = [(X_eval, y_eval)]
+                else:
+                    fit_params['eval_set'] = [(X_eval, y_eval)]
+                    fit_params['callbacks'] = [lgb.early_stopping(XGB_EARLY_STOPPING_ROUNDS, verbose=False)]
+                model.fit(X_train_sub, y_train_sub, **fit_params)
                 predictions[cursor:segment_end] = model.predict_proba(
                     X_all.iloc[cursor:segment_end]
                 )[:, 1]
@@ -106,20 +115,30 @@ def _cached_walk_forward_train(
         data['WF_Prediction'] = predictions
         feature_importances = dict(zip(actual_features, model.feature_importances_))
 
-        tscv = TimeSeriesSplit(n_splits=5)
+        embargo = 2 * horizon
+        n_cv_splits = 5
         cv_scores = []
-        X_train_init = X_all.iloc[:initial_train_end]
-        y_train_init = y_all.iloc[:initial_train_end]
+        cv_chunk = initial_train_end // (n_cv_splits + 1)
 
-        for train_idx, val_idx in tscv.split(X_train_init):
-            if len(train_idx) < 20:
+        for fold in range(n_cv_splits):
+            train_end_cv = cv_chunk * (fold + 1)
+            val_start_cv = train_end_cv + embargo
+            val_end_cv = min(val_start_cv + cv_chunk, initial_train_end)
+
+            if train_end_cv < 30 or val_start_cv >= val_end_cv:
                 continue
-            model.fit(X_train_init.iloc[train_idx], y_train_init.iloc[train_idx])
+
+            X_tr_cv = X_all.iloc[:train_end_cv]
+            y_tr_cv = y_all.iloc[:train_end_cv]
+            X_val_cv = X_all.iloc[val_start_cv:val_end_cv]
+            y_val_cv = y_all.iloc[val_start_cv:val_end_cv]
+
+            if len(X_val_cv) < 5:
+                continue
+
+            model.fit(X_tr_cv, y_tr_cv)
             cv_scores.append(
-                accuracy_score(
-                    y_train_init.iloc[val_idx],
-                    model.predict(X_train_init.iloc[val_idx]),
-                )
+                accuracy_score(y_val_cv, model.predict(X_val_cv))
             )
 
     return data, model, feature_importances, cv_scores
@@ -149,7 +168,6 @@ class XGBoostRangeBarModel:
             learning_rate=XGB_LEARNING_RATE,
             objective='binary:logistic', random_state=42,
             subsample=0.8, colsample_bytree=0.8,
-            early_stopping_rounds=10,
         )
         self.is_trained = False
         self.is_cached = False

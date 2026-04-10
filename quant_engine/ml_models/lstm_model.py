@@ -11,7 +11,6 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 logger = logging.getLogger(__name__)
 
-
 class PyTorchLSTM(nn.Module):
     """Two-layer LSTM with dropout followed by a sigmoid head."""
 
@@ -33,15 +32,16 @@ class PyTorchLSTM(nn.Module):
 
 
 class LSTMSwingModel:
-    """Wrapper integrating PyTorch LSTM into the quant-engine workflow."""
+    """Wrapper integrating PyTorch LSTM with expanding-window walk-forward training."""
 
     FEATURE_COLS = [
         'Ret_1', 'Ret_5', 'Vol_Ratio', 'RSI_14', 'MACD_Hist', 'Z_Score',
     ]
 
-    def __init__(self, sequence_length: int = 30, epochs: int = 15):
+    def __init__(self, sequence_length: int = 30, epochs: int = 15, n_wf_folds: int = 3):
         self.sequence_length = sequence_length
         self.epochs = epochs
+        self.n_wf_folds = n_wf_folds
         self.scaler = StandardScaler()
         self.model = None
         self.is_trained = False
@@ -86,39 +86,12 @@ class LSTMSwingModel:
             torch.tensor(y_seq, dtype=torch.float32).unsqueeze(1),
         )
 
-    def train(self, df: pd.DataFrame):
-        """Train the LSTM with a proper train/test split."""
-        df_feat = self.build_features(df)
+    def _train_single_fold(self, X_scaled: np.ndarray, y: np.ndarray):
+        """Train the LSTM on a single data fold."""
+        if len(X_scaled) < self.sequence_length * 2:
+            return
 
-        horizon = 10
-        df_feat['Target'] = np.where(
-            df_feat['Close'].shift(-horizon) > df_feat['Close'], 1, 0,
-        )
-        df_feat = df_feat.dropna()
-
-        if len(df_feat) < self.sequence_length * 2:
-            return None
-
-        train_end = int(len(df_feat) * 0.70)
-        purge_gap = horizon
-        test_start = train_end + purge_gap
-
-        if test_start >= len(df_feat):
-            test_start = train_end
-
-        train_df = df_feat.iloc[:train_end]
-        test_df = df_feat.iloc[test_start:]
-
-        X_train_raw = train_df[self.FEATURE_COLS].values
-        y_train_raw = train_df['Target'].values
-
-        self.scaler.fit(X_train_raw)
-        X_train_scaled = self.scaler.transform(X_train_raw)
-
-        if len(X_train_scaled) < self.sequence_length * 2:
-            return None
-
-        X_tensor, y_tensor = self._create_sequences(X_train_scaled, y_train_raw)
+        X_tensor, y_tensor = self._create_sequences(X_scaled, y)
 
         self.model = PyTorchLSTM(input_dim=len(self.FEATURE_COLS)).to(self.device)
         criterion = nn.BCELoss()
@@ -135,19 +108,71 @@ class LSTMSwingModel:
             loss.backward()
             optimizer.step()
 
-        self.is_trained = True
+    def train(self, df: pd.DataFrame):
+        """Expanding-window walk-forward training with purge gap."""
+        df_feat = self.build_features(df)
 
+        horizon = 10
+        purge_gap = horizon
+        df_feat['Target'] = np.where(
+            df_feat['Close'].shift(-horizon) > df_feat['Close'], 1, 0,
+        )
+        df_feat = df_feat.dropna()
+
+        if len(df_feat) < self.sequence_length * 2:
+            return None
+
+        n = len(df_feat)
         predictions = np.full(len(df), 0.5)
+        fold_size = n // (self.n_wf_folds + 1)
+
+        for fold in range(self.n_wf_folds):
+            train_end = fold_size * (fold + 1)
+            test_start = train_end + purge_gap
+            test_end = min(test_start + fold_size, n)
+
+            if train_end < self.sequence_length * 2 or test_start >= test_end:
+                continue
+
+            train_df = df_feat.iloc[:train_end]
+            test_df = df_feat.iloc[test_start:test_end]
+
+            X_train_raw = train_df[self.FEATURE_COLS].values
+            self.scaler.fit(X_train_raw)
+            X_train_scaled = self.scaler.transform(X_train_raw)
+            y_train = train_df['Target'].values
+
+            self._train_single_fold(X_train_scaled, y_train)
+
+            if self.model is not None and len(test_df) >= self.sequence_length:
+                X_test_raw = test_df[self.FEATURE_COLS].values
+                X_test_scaled = self.scaler.transform(X_test_raw)
+                X_test_tensor, _ = self._create_sequences(X_test_scaled, np.zeros(len(X_test_scaled)))
+                X_test_tensor = X_test_tensor.to(self.device)
+
+                self.model.eval()
+                with torch.no_grad():
+                    preds = self.model(X_test_tensor).cpu().numpy().flatten()
+
+                test_indices = df_feat.index[test_start:test_end]
+                pred_offset = len(test_indices) - len(preds)
+                for idx_i in range(len(preds)):
+                    orig_pos = df.index.get_loc(test_indices[pred_offset + idx_i])
+                    if isinstance(orig_pos, int):
+                        predictions[orig_pos] = preds[idx_i]
+
+        self.is_trained = self.model is not None
 
         all_X = df_feat[self.FEATURE_COLS].values
         all_X_scaled = self.scaler.transform(all_X)
 
-        self.model.eval()
-        with torch.no_grad():
-            X_all_tensor, _ = self._create_sequences(all_X_scaled, np.zeros(len(all_X_scaled)))
-            X_all_tensor = X_all_tensor.to(self.device)
-            preds = self.model(X_all_tensor).cpu().numpy().flatten()
-            predictions[-len(preds):] = preds
+        if self.is_trained:
+            self.model.eval()
+            with torch.no_grad():
+                X_all_tensor, _ = self._create_sequences(all_X_scaled, np.zeros(len(all_X_scaled)))
+                X_all_tensor = X_all_tensor.to(self.device)
+                full_preds = self.model(X_all_tensor).cpu().numpy().flatten()
+                predictions[-len(full_preds):] = full_preds
 
         df['WF_Prediction'] = predictions
         return df

@@ -1,8 +1,10 @@
-"""Advanced backtester with market realism (costs, slippage, spread, delay, fill probability)."""
+"""Advanced backtester with market realism (costs, dynamic slippage, spread, delay, fill probability)."""
 
 import pandas as pd
 import numpy as np
 from .strategies.base import BaseStrategy
+from .slippage_model import DynamicSlippageModel
+from .risk_metrics import compute_var, compute_cvar
 
 
 def run_advanced_backtest(
@@ -18,8 +20,10 @@ def run_advanced_backtest(
     from config import (
         MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT,
         CONTRACT_SIZES, MAX_ALLOWED_LOTS,
-        TRANSACTION_COST_BPS, SLIPPAGE_PCT, AVERAGE_SPREAD_PIPS,
+        TRANSACTION_COST_BPS,
+        AVERAGE_SPREAD_PIPS,
         EXECUTION_DELAY_BARS, ORDER_FILL_PROB,
+        SLIPPAGE_BASE_BPS, SLIPPAGE_VOL_EXPONENT, SLIPPAGE_VOLUME_EXPONENT,
     )
 
     df = trading_data.copy()
@@ -30,14 +34,32 @@ def run_advanced_backtest(
     equity_curve[0] = initial_capital
 
     contract_size = CONTRACT_SIZES.get(symbol, 100_000.0)
+    slippage_model = DynamicSlippageModel(
+        base_bps=SLIPPAGE_BASE_BPS,
+        vol_exponent=SLIPPAGE_VOL_EXPONENT,
+        volume_exponent=SLIPPAGE_VOLUME_EXPONENT,
+    )
 
     closes = df['Close'].values
     highs = df['High'].values
     lows = df['Low'].values
     signals = df['Signal'].values
+    volumes = df['Volume'].values
     exit_longs = df['Exit_Long'].values if 'Exit_Long' in df.columns else np.zeros(n, dtype=bool)
     exit_shorts = df['Exit_Short'].values if 'Exit_Short' in df.columns else np.zeros(n, dtype=bool)
     stds = df['Std'].values if 'Std' in df.columns else np.full(n, np.nan)
+
+    from .indicators import calculate_atr as _calc_atr
+    try:
+        atr_series = _calc_atr(df, 14).values
+    except Exception:
+        atr_series = np.full(n, np.nan)
+
+    avg_atr = np.full(n, np.nan)
+    avg_vol = np.full(n, np.nan)
+    for i in range(20, n):
+        avg_atr[i] = np.nanmean(atr_series[max(0, i - 20):i])
+        avg_vol[i] = np.nanmean(volumes[max(0, i - 20):i])
 
     has_sl = 'SL_Price' in df.columns
     has_tp = 'TP_Price' in df.columns
@@ -137,7 +159,13 @@ def run_advanced_backtest(
         should_exit = current_position != 0 and (exit_signal or sl_hit or tp_hit or hold_exit)
 
         if should_exit:
-            exit_slip = slippage if current_position == 1 else -slippage
+            bar_atr = atr_series[i] if not np.isnan(atr_series[i]) else 0.0
+            bar_avg_atr = avg_atr[i] if not np.isnan(avg_atr[i]) else bar_atr
+            bar_avg_vol = avg_vol[i] if not np.isnan(avg_vol[i]) else volumes[i]
+            exit_slippage = slippage_model.estimate(
+                closes[i], bar_atr, volumes[i], bar_avg_vol, bar_avg_atr,
+            )
+            exit_slip = exit_slippage if current_position == 1 else -exit_slippage
 
             if sl_hit:
                 actual_exit = active_sl - exit_slip
@@ -149,7 +177,6 @@ def run_advanced_backtest(
             trade_pnl_raw = (
                 (actual_exit - entry_price) / (entry_price + 1e-8)
             ) * position_size_usd * current_position
-
 
             transaction_cost = trade_pnl_raw * (TRANSACTION_COST_BPS / 10_000)
 
@@ -194,7 +221,14 @@ def run_advanced_backtest(
 
             if i + EXECUTION_DELAY_BARS < n:
                 entry_idx = i + EXECUTION_DELAY_BARS
-                real_slippage = SLIPPAGE_PCT * closes[i] if sig == 1 else -SLIPPAGE_PCT * closes[i]
+
+                bar_atr = atr_series[i] if not np.isnan(atr_series[i]) else 0.0
+                bar_avg_atr = avg_atr[i] if not np.isnan(avg_atr[i]) else bar_atr
+                bar_avg_vol = avg_vol[i] if not np.isnan(avg_vol[i]) else volumes[i]
+                entry_slippage = slippage_model.estimate(
+                    closes[i], bar_atr, volumes[i], bar_avg_vol, bar_avg_atr,
+                )
+                real_slippage = entry_slippage if sig == 1 else -entry_slippage
 
                 spread_price = AVERAGE_SPREAD_PIPS * 0.0001 * closes[i]
                 entry_price = closes[i] + real_slippage + (spread_price if sig == 1 else -spread_price)
@@ -250,7 +284,7 @@ def _compute_metrics(
     initial_capital: float,
     trades: list,
 ) -> dict:
-    """Compute risk-adjusted performance metrics."""
+    """Compute risk-adjusted performance metrics including VaR and CVaR."""
     total_return = (equity_curve[-1] / initial_capital) - 1 if equity_curve[-1] > 0 else -1.0
 
     eq_series = pd.Series(equity_curve)
@@ -289,6 +323,10 @@ def _compute_metrics(
     avg_win_loss_ratio = avg_win / (avg_loss + 1e-10) if avg_loss > 0 else 0.0
     profit_factor = sum(wins) / (abs(sum(losses)) + 1e-10) if losses else float('inf')
 
+    returns_arr = bar_returns.values
+    var_95 = compute_var(returns_arr, 0.95)
+    cvar_95 = compute_cvar(returns_arr, 0.95)
+
     return {
         'total_return': total_return,
         'max_drawdown': max_drawdown,
@@ -303,6 +341,8 @@ def _compute_metrics(
         'profit_factor': profit_factor,
         'n_trades': n_trades,
         'max_consecutive_losses': _max_consecutive_losses(pnls),
+        'var_95': var_95,
+        'cvar_95': cvar_95,
     }
 
 
