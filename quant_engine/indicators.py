@@ -9,7 +9,7 @@ def calculate_vwap_with_bands(
     window: int = 200,
     session_reset: str | None = None,
 ) -> pd.DataFrame:
-    """Rolling anchored VWAP with ±2σ bands, optionally resetting at session boundaries."""
+    """Rolling anchored VWAP with +/-2σ bands, optionally resetting at session boundaries."""
     df = df.copy()
     df['Typical_Price'] = (df['High'] + df['Low'] + df['Close']) / 3
     df['VP'] = df['Typical_Price'] * df['Volume']
@@ -176,68 +176,3 @@ def calculate_return_autocorrelation(
     )
 
 
-def calculate_supertrend(
-    df: pd.DataFrame,
-    period: int = 10,
-    multiplier: float = 3.0,
-) -> pd.DataFrame:
-    """Classic SuperTrend indicator."""
-    atr = calculate_atr(df, period)
-    hl2 = (df['High'] + df['Low']) / 2.0
-
-    basic_upper = hl2 + (multiplier * atr)
-    basic_lower = hl2 - (multiplier * atr)
-
-    close = df['Close'].values
-
-    final_upper = np.zeros(len(df))
-    final_lower = np.zeros(len(df))
-    trend = np.ones(len(df))
-
-    for i in range(len(df)):
-        if i == 0:
-            final_upper[i] = basic_upper.iloc[i]
-            final_lower[i] = basic_lower.iloc[i]
-            trend[i] = 1
-            continue
-
-        prev_upper = final_upper[i - 1]
-        prev_lower = final_lower[i - 1]
-        prev_close = close[i - 1]
-
-        if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper:
-            final_upper[i] = basic_upper.iloc[i]
-        else:
-            final_upper[i] = prev_upper
-
-        if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower:
-            final_lower[i] = basic_lower.iloc[i]
-        else:
-            final_lower[i] = prev_lower
-
-        if trend[i - 1] == 1:
-            if close[i] < final_lower[i]:
-                trend[i] = -1
-            else:
-                trend[i] = 1
-        else:
-            if close[i] > final_upper[i]:
-                trend[i] = 1
-            else:
-                trend[i] = -1
-
-    res = pd.DataFrame(index=df.index)
-    res['SuperTrend_Upper'] = final_upper
-    res['SuperTrend_Lower'] = final_lower
-    res['SuperTrend_Trend'] = trend
-    return res
-
-
-def calculate_weis_wave_volume(df: pd.DataFrame) -> pd.Series:
-    """Weis Wave Volume — cumulative directional volume within each wave."""
-    dir_series = np.where(df['Close'] >= df['Open'], 1, -1)
-    dir_series = pd.Series(dir_series, index=df.index)
-    trend_shift = dir_series != dir_series.shift(1)
-    wave_id = trend_shift.cumsum()
-    weis_vol = df.groupby(wave_id)['Volume'].cumsum() * dir_series
-    return weis_vol

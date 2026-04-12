@@ -14,8 +14,9 @@ class LGBMRangeBarModel(XGBoostRangeBarModel):
         self,
         tp_mult: float = XGB_TP_MULT,
         sl_mult: float = XGB_SL_MULT,
+        feature_cols: list | None = None,
     ):
-        super().__init__(tp_mult=tp_mult, sl_mult=sl_mult)
+        super().__init__(tp_mult=tp_mult, sl_mult=sl_mult, feature_cols=feature_cols)
         self.model = lgb.LGBMClassifier(
             num_leaves=31,
             max_depth=-1,
@@ -35,7 +36,7 @@ class LGBMRangeBarModel(XGBoostRangeBarModel):
             df.index, df.values, df.columns, initial_train_frac,
             self.model.n_estimators, -1, self.model.learning_rate,
             self.horizon_param, self.refit_param,
-            self.tp_mult, self.sl_mult, self.FEATURE_COLS,
+            self.tp_mult, self.sl_mult, self.feature_cols,
             model_type='lightgbm',
         )
         if data is None:

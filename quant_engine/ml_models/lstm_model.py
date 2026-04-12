@@ -34,11 +34,16 @@ class PyTorchLSTM(nn.Module):
 class LSTMSwingModel:
     """Wrapper integrating PyTorch LSTM with expanding-window walk-forward training."""
 
-    FEATURE_COLS = [
-        'Ret_1', 'Ret_5', 'Vol_Ratio', 'RSI_14', 'MACD_Hist', 'Z_Score',
-    ]
-
-    def __init__(self, sequence_length: int = 30, epochs: int = 15, n_wf_folds: int = 3):
+    def __init__(
+        self,
+        sequence_length: int = 30,
+        epochs: int = 15,
+        n_wf_folds: int = 3,
+        feature_cols: list | None = None,
+    ):
+        self.feature_cols = feature_cols or [
+            'Ret_1', 'Ret_5', 'Vol_Ratio', 'RSI_14', 'MACD_Hist', 'Z_Score',
+        ]
         self.sequence_length = sequence_length
         self.epochs = epochs
         self.n_wf_folds = n_wf_folds
@@ -93,7 +98,7 @@ class LSTMSwingModel:
 
         X_tensor, y_tensor = self._create_sequences(X_scaled, y)
 
-        self.model = PyTorchLSTM(input_dim=len(self.FEATURE_COLS)).to(self.device)
+        self.model = PyTorchLSTM(input_dim=len(self.feature_cols)).to(self.device)
         criterion = nn.BCELoss()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 
@@ -137,7 +142,7 @@ class LSTMSwingModel:
             train_df = df_feat.iloc[:train_end]
             test_df = df_feat.iloc[test_start:test_end]
 
-            X_train_raw = train_df[self.FEATURE_COLS].values
+            X_train_raw = train_df[self.feature_cols].values
             self.scaler.fit(X_train_raw)
             X_train_scaled = self.scaler.transform(X_train_raw)
             y_train = train_df['Target'].values
@@ -145,7 +150,7 @@ class LSTMSwingModel:
             self._train_single_fold(X_train_scaled, y_train)
 
             if self.model is not None and len(test_df) >= self.sequence_length:
-                X_test_raw = test_df[self.FEATURE_COLS].values
+                X_test_raw = test_df[self.feature_cols].values
                 X_test_scaled = self.scaler.transform(X_test_raw)
                 X_test_tensor, _ = self._create_sequences(X_test_scaled, np.zeros(len(X_test_scaled)))
                 X_test_tensor = X_test_tensor.to(self.device)
@@ -163,7 +168,7 @@ class LSTMSwingModel:
 
         self.is_trained = self.model is not None
 
-        all_X = df_feat[self.FEATURE_COLS].values
+        all_X = df_feat[self.feature_cols].values
         all_X_scaled = self.scaler.transform(all_X)
 
         if self.is_trained:
@@ -182,7 +187,7 @@ class LSTMSwingModel:
         if not self.is_trained or len(df_features) < self.sequence_length:
             return np.full(len(df_features), 0.5)
 
-        X = df_features[self.FEATURE_COLS].fillna(0).values
+        X = df_features[self.feature_cols].fillna(0).values
         X_scaled = self.scaler.transform(X)
 
         X_tensor, _ = self._create_sequences(X_scaled, np.zeros(len(X_scaled)))

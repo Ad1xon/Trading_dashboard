@@ -21,6 +21,7 @@ from quant_engine.indicators import (
 )
 from alerts.alert_manager import AlertManager
 from quant_engine.macro_filter import MacroFilter
+from quant_engine.scanner import MarketScanner
 
 
 SWING_STRATEGIES = {'LSTM Swing'}
@@ -69,54 +70,25 @@ def render_scanner_view(lang: str):
 
     if st.button(t.get("run_scanner", "Run Scanner"), key="btn_scanner"):
         with st.spinner(t.get("scanner_running", "Scanning markets...")):
+            scanner_engine = MarketScanner()
+            raw_results = scanner_engine.run_scan(
+                selected_symbols=selected_symbols,
+                data_mode_scan=data_mode_scan,
+                tf_options=tf_options,
+                scan_days=scan_days,
+                range_val=range_val
+            )
+            
             scan_results = []
-
-            from utils.event_bus import EventBus
-            bus = EventBus()
-
-            for sym_name in selected_symbols:
-                mt5_sym = MT5_SYMBOLS[sym_name]
-                mt5_tf = tf_options[data_mode_scan]
-
-                df_raw = get_mt5_data(mt5_sym, scan_days, timeframe=mt5_tf)
-                if df_raw.empty:
-                    continue
-
-                if "Range Bars" in data_mode_scan:
-                    rb = generate_synthetic_range_bars(df_raw, range_val)
-                else:
-                    rb = df_raw.copy()
-
-                if len(rb) < 30:
-                    continue
-
-                rb_vwap = calculate_vwap_with_bands(rb)
-                rb_vwap['RSI'] = calculate_rsi(rb_vwap['Close'], 14)
-                rb_vwap['ATR'] = calculate_atr(rb_vwap, 14)
-
-                latest = rb_vwap.iloc[-1]
-                signal = "—"
-                confidence = 0.0
-
-                sweep = detect_liquidity_sweep(rb)
-                if sweep["signal"]:
-                    signal = sweep["type"]
-                    confidence = 0.75
-                    bus.publish_sync("LIQUIDITY_SWEEP", {
-                        "symbol": sym_name,
-                        "message": sweep["message"],
-                        "signal_type": sweep["type"],
-                        "confidence": confidence,
-                    })
-
+            for res in raw_results:
                 scan_results.append({
-                    t.get("col_symbol", "Symbol"): sym_name,
-                    t.get("col_price", "Price"): f"{latest['Close']:.5f}",
-                    t.get("col_vwap", "VWAP"): f"{latest.get('VWAP', 0):.5f}",
-                    t.get("col_rsi", "RSI"): f"{latest.get('RSI', 0):.1f}",
-                    t.get("col_atr", "ATR"): f"{latest.get('ATR', 0):.5f}",
-                    t.get("col_signal", "Signal"): signal,
-                    t.get("col_confidence", "Confidence"): f"{confidence * 100:.0f}%",
+                    t.get("col_symbol", "Symbol"): res["symbol"],
+                    t.get("col_price", "Price"): f"{res['price']:.5f}",
+                    t.get("col_vwap", "VWAP"): f"{res['vwap']:.5f}",
+                    t.get("col_rsi", "RSI"): f"{res['rsi']:.1f}",
+                    t.get("col_atr", "ATR"): f"{res['atr']:.5f}",
+                    t.get("col_signal", "Signal"): res["signal"],
+                    t.get("col_confidence", "Confidence"): f"{res['confidence'] * 100:.0f}%",
                 })
 
             if scan_results:

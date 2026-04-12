@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 from .base import BaseStrategy
-from ..indicators import calculate_atr, calculate_supertrend, calculate_weis_wave_volume
+from ..indicators import calculate_atr
 from ..ml_models import LGBMRangeBarModel
 from data_feed.nlp_engine import SentimentEngine
 

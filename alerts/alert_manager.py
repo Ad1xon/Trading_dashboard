@@ -13,13 +13,11 @@ logger = logging.getLogger(__name__)
 class AlertManager:
     """Central alert manager linking scanner / engine signals to notification channels."""
 
-    DEFAULT_COOLDOWN_SEC = 300
-
-    def __init__(self):
+    def __init__(self, cooldown_sec: int = 300):
         self._discord: Optional[DiscordNotifier] = None
         self._thresholds: dict[str, dict] = {}
         self._recent_alerts: dict[str, float] = {}
-        self.cooldown_sec = self.DEFAULT_COOLDOWN_SEC
+        self.cooldown_sec = cooldown_sec
         self.enabled = True
 
         self.bus = EventBus()

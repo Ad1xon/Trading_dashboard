@@ -147,18 +147,19 @@ def _cached_walk_forward_train(
 class XGBoostRangeBarModel:
     """Walk-forward XGBoost classifier for price-direction prediction."""
 
-    FEATURE_COLS = [
-        'Dir_Sum_5', 'Vol_Ratio', 'Close_Diff', 'Variance_Ratio',
-        'RSI_14', 'ATR_14', 'BB_PctB', 'BB_Width',
-        'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
-        'Sentiment_Score',
-    ]
-
     def __init__(
         self,
         tp_mult: float = XGB_TP_MULT,
         sl_mult: float = XGB_SL_MULT,
+        feature_cols: list | None = None,
     ):
+        self.feature_cols = feature_cols or [
+            'Vol_Ratio', 'Close_Diff',
+            'RSI_14', 'ATR_14', 'BB_PctB', 'BB_Width',
+            'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
+            'Sentiment_Score',
+        ]
+
         self.horizon_param = XGB_HORIZON
         self.refit_param = XGB_REFIT_EVERY
         self.tp_mult = tp_mult
@@ -242,7 +243,7 @@ class XGBoostRangeBarModel:
             self.model.n_estimators, self.model.max_depth,
             self.model.learning_rate,
             self.horizon_param, self.refit_param,
-            self.tp_mult, self.sl_mult, self.FEATURE_COLS,
+            self.tp_mult, self.sl_mult, self.feature_cols,
             model_type='xgboost',
         )
 
@@ -263,13 +264,13 @@ class XGBoostRangeBarModel:
         if not self.is_trained:
             return np.full(len(df_features), 0.5)
 
-        actual_features = [c for c in self.FEATURE_COLS if c in df_features.columns]
-        if len(actual_features) < len(self.FEATURE_COLS):
-            for col in self.FEATURE_COLS:
+        actual_features = [c for c in self.feature_cols if c in df_features.columns]
+        if len(actual_features) < len(self.feature_cols):
+            for col in self.feature_cols:
                 if col not in df_features.columns:
                     df_features[col] = 0.0
 
-        X = df_features[self.FEATURE_COLS]
+        X = df_features[self.feature_cols]
         X = X.ffill().fillna(0)
 
         with warnings.catch_warnings():
