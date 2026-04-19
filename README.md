@@ -7,14 +7,15 @@ A comprehensive, production-ready quantitative trading engine and dashboard desi
 This repository contains an advanced algorithmic trading framework that integrates machine learning prediction models, statistical mean-reversion, intraday volume scalping, and global macroeconomic sentiment analysis. The system is built for institutional-grade reliability, preventing look-ahead bias and incorporating exact transaction costs (slippage/spread).
 
 ### Key Features
-- **Hidden Markov Regime Detection**: Applies Gaussian HMMs to partition the market into discrete volatility states (e.g. low-vol trending vs high-vol chop). Strategies apply dynamic filtering to switch behaviors depending on the detected regime.
+
 - **Dynamic Market Scanner**: Real-time multi-timeframe scanner identifying liquidity sweeps, VWAP setups, and RSI extremes.
 - **Advanced Backtester**: Fully vectorized and walk-forward optimized backtesting engine. Supports custom Range Bars and exact MetaTrader 5 tick-level simulation.
 - **Machine Learning Integration**: Built-in XGBoost, LightGBM, and PyTorch LSTM models utilizing Purged Walk-Forward Cross-Validation.
 - **Risk Management**: Dynamic ATR-based Stop Loss and Take Profit levels with account margin call circuit breakers and VaR/CVaR risk metrics.
 - **Global Macro Filter**: FinBERT-powered NLP sentiment analysis on live news and High-Impact economic calendar events integration.
 - **Alert System**: Centralized Event Bus architecture dispatching deduped trading signals directly to Discord webhooks.
-
+- **Hidden Markov Regime Detection**: Applies Gaussian HMMs to partition the market into discrete volatility states (e.g. low-vol trending vs high-vol chop). Strategies apply dynamic filtering to switch behaviors depending on the detected regime.
+- 
 ## Architecture
 
 The project is structured into logically segregated components for scalability:
@@ -55,7 +56,7 @@ All strategies inherit from `BaseStrategy` and dynamically generate entry/exit a
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/quant-engine.git
+git clone https://github.com/Ad1xon/Trading_dashboard.git
 cd quant-engine
 
 # 2. Install dependencies
