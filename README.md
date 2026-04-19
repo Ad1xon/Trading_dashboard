@@ -15,7 +15,6 @@ This repository contains an advanced algorithmic trading framework that integrat
 - **Global Macro Filter**: FinBERT-powered NLP sentiment analysis on live news and High-Impact economic calendar events integration.
 - **Alert System**: Centralized Event Bus architecture dispatching deduped trading signals directly to Discord webhooks.
 - **Hidden Markov Regime Detection**: Applies Gaussian HMMs to partition the market into discrete volatility states (e.g. low-vol trending vs high-vol chop). Strategies apply dynamic filtering to switch behaviors depending on the detected regime.
-- 
 ## Architecture
 
 The project is structured into logically segregated components for scalability:
