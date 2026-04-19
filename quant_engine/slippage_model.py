@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from config import SLIPPAGE_BASE_BPS, SLIPPAGE_VOL_EXPONENT, SLIPPAGE_VOLUME_EXPONENT
+from config import SLIPPAGE_BASE_BPS, SLIPPAGE_VOL_EXPONENT
 
 
 class DynamicSlippageModel:
@@ -11,12 +11,10 @@ class DynamicSlippageModel:
     def __init__(
         self,
         base_bps: float = SLIPPAGE_BASE_BPS,
-        vol_exponent: float = SLIPPAGE_VOL_EXPONENT,
-        volume_exponent: float = SLIPPAGE_VOLUME_EXPONENT,
+        vol_exponent: float = SLIPPAGE_VOL_EXPONENT
     ):
         self.base_bps = base_bps
         self.vol_exponent = vol_exponent
-        self.volume_exponent = volume_exponent
 
     def estimate(
         self,
@@ -31,7 +29,7 @@ class DynamicSlippageModel:
             return self.base_bps * 1e-4 * price
 
         vol_ratio = (atr / avg_atr) ** self.vol_exponent
-        liquidity_ratio = (avg_volume / max(volume, 1.0)) ** self.volume_exponent
+        liquidity_ratio = (avg_volume / max(volume, 1.0)) ** self.vol_exponent
         adjusted_bps = self.base_bps * vol_ratio * liquidity_ratio
         return adjusted_bps * 1e-4 * price
 
@@ -57,7 +55,7 @@ class DynamicSlippageModel:
         vol_ratio = np.where(valid, (atrs / np.where(avg_atr > 1e-10, avg_atr, 1.0)) ** self.vol_exponent, 1.0)
         liq_ratio = np.where(
             valid,
-            (np.where(avg_vol > 1e-10, avg_vol, 1.0) / np.maximum(volumes, 1.0)) ** self.volume_exponent,
+            (np.where(avg_vol > 1e-10, avg_vol, 1.0) / np.maximum(volumes, 1.0)) ** self.vol_exponent,
             1.0,
         )
         slippage = self.base_bps * 1e-4 * vol_ratio * liq_ratio * prices

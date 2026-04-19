@@ -129,11 +129,6 @@ def render_backtester_view(lang: str):
     is_swing = strategy_choice in SWING_STRATEGIES
     default_days = 730 if is_swing else 365
 
-    days_back = st.sidebar.slider(
-        t.get("history_days", "History Depth (Days)"),
-        1, 5000, default_days, key="bt_days",
-    )
-
     tf_options = {
         "Range Bars (M1 Base)": mt5.TIMEFRAME_M1,
         "M15 (Time-based)": mt5.TIMEFRAME_M15,
@@ -146,6 +141,19 @@ def render_backtester_view(lang: str):
     data_mode = st.sidebar.selectbox(
         "Timeframe / Data Mode", list(tf_options.keys()),
         index=default_tf_idx, key="bt_data_mode",
+    )
+
+    max_days = {
+        "Range Bars (M1 Base)": 90,
+        "M15 (Time-based)": 180,
+        "H1 (Time-based)": 730,
+        "H4 (Time-based)": 2000,
+        "D1 (Time-based)": 5000,
+    }.get(data_mode, 365)
+
+    days_back = st.sidebar.slider(
+        t.get("history_days", "History Depth (Days)"),
+        1, max_days, min(default_days, max_days), key="bt_days",
     )
 
     capital = st.sidebar.number_input(
@@ -213,26 +221,39 @@ def render_backtester_view(lang: str):
                 st.error("⚠️ MARGIN CALL — Account went bankrupt during simulation!")
 
             c1, c2, c3, c4 = st.columns(4)
+            data_days = (trading_data.index[-1] - trading_data.index[0]).days if isinstance(trading_data.index, pd.DatetimeIndex) and len(trading_data) > 0 else 0
+            
+            train_days = 0 
+            if hasattr(strat, 'ml_model') and hasattr(strat.ml_model, 'horizon_param'):
+                train_sample = min(len(trading_data) // 3, 5000) # proxy
+                train_days = int(data_days * (train_sample / max(1, len(trading_data))))
+            test_days = data_days - train_days
+
             c1.metric(t.get("stats_bars", "Analyzed Bars"), len(trading_data))
             c2.metric(t.get("stats_trades", "Total Trades"), results['n_trades'])
-            _colored_metric(c3, t.get("stats_return", "Total Return"), results['total_return'] * 100, fmt="{:.2f}%")
-            _colored_metric(c4, t.get("stats_dd", "Max Drawdown"), results['max_drawdown'] * 100, fmt="{:.2f}%", invert=True)
-
+            c3.metric("Est. Phase Split", f"{train_days}d Train / {test_days}d Test" if train_days > 0 else f"{data_days}d Overall")
+            _colored_metric(c4, t.get("stats_return", "Total Return"), results['total_return'] * 100, fmt="{:.2f}%")
+            
             c5, c6, c7, c8 = st.columns(4)
-            _colored_metric(c5, t.get("stats_sharpe", "Sharpe Ratio"), results['sharpe_ratio'], fmt="{:.2f}")
-            _colored_metric(c6, t.get("stats_sortino", "Sortino Ratio"), results['sortino_ratio'], fmt="{:.2f}")
-            c7.metric(t.get("stats_winrate", "Win Rate"), f"{results['win_rate'] * 100:.1f}%")
-            c8.metric(t.get("stats_pf", "Profit Factor"), f"{results['profit_factor']:.2f}")
+            _colored_metric(c5, t.get("stats_dd", "Max Drawdown"), results['max_drawdown'] * 100, fmt="{:.2f}%", invert=True)
+            c6.metric(t.get("stats_winrate", "Win Rate"), f"{results['win_rate'] * 100:.1f}%")
+            c7.metric(t.get("stats_pf", "Profit Factor"), f"{results['profit_factor']:.2f}")
+            c8.metric(t.get("stats_avg_wl", "Avg Win/Loss Ratio"), f"{results['avg_win_loss_ratio']:.2f}")
 
             c9, c10, c11, c12 = st.columns(4)
-            _colored_metric(c9, t.get("stats_calmar", "Calmar Ratio"), results['calmar_ratio'], fmt="{:.2f}")
-            c10.metric(t.get("stats_avg_wl", "Avg Win/Loss Ratio"), f"{results['avg_win_loss_ratio']:.2f}")
-            c11.metric(t.get("stats_max_consec_loss", "Max Consec. Losses"), results['max_consecutive_losses'])
-            _colored_metric(c12, "VaR (95%)", results.get('var_95', 0.0) * 100, fmt="{:.3f}%", invert=True)
+            _colored_metric(c9, t.get("stats_sharpe", "Sharpe Ratio"), results['sharpe_ratio'], fmt="{:.2f}",
+                            help="Risk-adjusted return vs volatility limit.")
+            _colored_metric(c10, t.get("stats_sortino", "Sortino Ratio"), results['sortino_ratio'], fmt="{:.2f}",
+                            help="Risk-adjusted return strictly vs downside volatility.")
+            _colored_metric(c11, t.get("stats_calmar", "Calmar Ratio"), results['calmar_ratio'], fmt="{:.2f}",
+                            help="Annualized Return scaled by Max Drawdown.")
+            c12.metric(t.get("stats_max_consec_loss", "Max Consec. Losses"), results['max_consecutive_losses'])
 
             c13, c14, c15, c16 = st.columns(4)
-            _colored_metric(c13, "CVaR (95%)", results.get('cvar_95', 0.0) * 100, fmt="{:.3f}%", invert=True)
-            c14.metric("", "")
+            _colored_metric(c13, "VaR (95%)", results.get('var_95', 0.0) * 100, fmt="{:.3f}%", invert=True,
+                            help="Value at Risk: The expected maximum loss at a 95% confidence interval.")
+            _colored_metric(c14, "CVaR (95%)", results.get('cvar_95', 0.0) * 100, fmt="{:.3f}%", invert=True,
+                            help="Conditional VaR: The average loss in the worst 5% of cases.")
             c15.metric("", "")
             c16.metric("", "")
 
@@ -540,13 +561,15 @@ def _colored_metric(
     value: float,
     fmt: str = "{:.2f}",
     invert: bool = False,
+    help: str | None = None,
 ):
     """Render a colour-coded metric (green for positive, red for negative)."""
     formatted = fmt.format(value)
     good = value < 0 if invert else value > 0
     color = "#00ff88" if good else "#ff4444"
+    help_html = f" title='{help}'" if help else ""
     col.markdown(
-        f"<div style='text-align:center'>"
+        f"<div{help_html} style='text-align:center; cursor:default;'>"
         f"<small style='color:#aaa'>{label}</small><br>"
         f"<span style='font-size:1.4em;font-weight:bold;color:{color}'>{formatted}</span>"
         f"</div>",

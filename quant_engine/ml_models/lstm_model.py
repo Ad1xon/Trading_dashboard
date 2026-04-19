@@ -200,3 +200,42 @@ class LSTMSwingModel:
         final_preds = np.full(len(df_features), 0.5)
         final_preds[-len(preds):] = preds
         return final_preds
+
+    def get_feature_importance(self) -> dict[str, float]:
+        """Estimate feature importance using the input-hidden layer weights proxy."""
+        if not getattr(self, 'is_trained', False) or self.model is None:
+            return {}
+        try:
+            wt = self.model.lstm.weight_ih_l0.detach().cpu().numpy()
+            importance = np.abs(wt).sum(axis=0)
+            importance = importance / (importance.sum() + 1e-8)
+            fi = {feat: float(imp) for feat, imp in zip(self.feature_cols, importance)}
+            return dict(sorted(fi.items(), key=lambda item: item[1], reverse=True))
+        except Exception as e:
+            logger.error(f"Cannot extract LSTM weights: {e}")
+            return {}
+
+    def plot_feature_importance(self):
+        """Plot the approximated feature importance as a horizontal bar chart."""
+        fi = self.get_feature_importance()
+        if not fi:
+            return None
+            
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(8, 5))
+        fig.patch.set_facecolor('#0E1117')
+        ax.set_facecolor('#0E1117')
+        
+        y_pos = np.arange(len(fi))
+        ax.barh(y_pos, list(fi.values()), color='#00ff88', align='center')
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(list(fi.keys()), color='white')
+        ax.invert_yaxis()
+        ax.set_xlabel('Relative Weight Magnitude', color='white')
+        ax.set_title('LSTM Feature Importance (Weight Proxy)', color='white')
+        ax.tick_params(colors='white')
+        
+        for spine in ax.spines.values():
+            spine.set_color('#555555')
+            
+        return fig

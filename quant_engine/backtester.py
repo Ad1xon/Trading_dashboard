@@ -23,8 +23,10 @@ def run_advanced_backtest(
         TRANSACTION_COST_BPS,
         AVERAGE_SPREAD_PIPS,
         EXECUTION_DELAY_BARS, ORDER_FILL_PROB,
-        SLIPPAGE_BASE_BPS, SLIPPAGE_VOL_EXPONENT, SLIPPAGE_VOLUME_EXPONENT,
+        SLIPPAGE_BASE_BPS, SLIPPAGE_VOL_EXPONENT,
     )
+
+    import MetaTrader5 as mt5
 
     df = trading_data.copy()
     df = strategy.generate_signals(df)
@@ -34,10 +36,18 @@ def run_advanced_backtest(
     equity_curve[0] = initial_capital
 
     contract_size = CONTRACT_SIZES.get(symbol, 100_000.0)
+    swap_long = -0.5
+    swap_short = -0.5
+    if mt5.terminal_info() is not None:
+        sym_info = mt5.symbol_info(symbol)
+        if sym_info is not None:
+            contract_size = sym_info.trade_contract_size
+            swap_long = sym_info.swap_long if hasattr(sym_info, 'swap_long') else -0.5
+            swap_short = sym_info.swap_short if hasattr(sym_info, 'swap_short') else -0.5
+
     slippage_model = DynamicSlippageModel(
         base_bps=SLIPPAGE_BASE_BPS,
         vol_exponent=SLIPPAGE_VOL_EXPONENT,
-        volume_exponent=SLIPPAGE_VOLUME_EXPONENT,
     )
 
     closes = df['Close'].values
@@ -107,6 +117,14 @@ def run_advanced_backtest(
         if current_position != 0:
             price_change_pct = (closes[i] - closes[i - 1]) / (closes[i - 1] + 1e-8)
             pnl = price_change_pct * position_size_usd * current_position
+            
+            if i > 0 and isinstance(df.index, pd.DatetimeIndex):
+                if df.index[i].date() != df.index[i - 1].date():
+                    swap_rate = swap_long if current_position == 1 else swap_short
+                    sz = position_size_usd / (contract_size * entry_price + 1e-8)
+                    swap_cost = sz * swap_rate
+                    pnl += swap_cost
+
             current_equity += pnl
             bars_held += 1
 

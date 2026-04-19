@@ -11,7 +11,7 @@ from utils.event_bus import EventBus
 
 
 class MarketScanner:
-    """Core market scanner engine decoupled from GUI."""
+    """Core market scanner engine"""
 
     def __init__(self):
         """Initialise scanner with event bus."""

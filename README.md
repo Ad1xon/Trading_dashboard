@@ -7,6 +7,7 @@ A comprehensive, production-ready quantitative trading engine and dashboard desi
 This repository contains an advanced algorithmic trading framework that integrates machine learning prediction models, statistical mean-reversion, intraday volume scalping, and global macroeconomic sentiment analysis. The system is built for institutional-grade reliability, preventing look-ahead bias and incorporating exact transaction costs (slippage/spread).
 
 ### Key Features
+- **Hidden Markov Regime Detection**: Applies Gaussian HMMs to partition the market into discrete volatility states (e.g. low-vol trending vs high-vol chop). Strategies apply dynamic filtering to switch behaviors depending on the detected regime.
 - **Dynamic Market Scanner**: Real-time multi-timeframe scanner identifying liquidity sweeps, VWAP setups, and RSI extremes.
 - **Advanced Backtester**: Fully vectorized and walk-forward optimized backtesting engine. Supports custom Range Bars and exact MetaTrader 5 tick-level simulation.
 - **Machine Learning Integration**: Built-in XGBoost, LightGBM, and PyTorch LSTM models utilizing Purged Walk-Forward Cross-Validation.
@@ -61,7 +62,7 @@ cd quant-engine
 pip install -r requirements.txt
 
 # 3. Launch the Quant Dashboard
-streamlit run dashboard/app.py
+python main.py
 ```
 
 ## Backtester Usage
@@ -71,6 +72,17 @@ Navigate to the **Advanced Backtester** tab in the dashboard.
 2. Choose from the `STRATEGY_REGISTRY`.
 3. Configure the backtest horizon, initial capital, and risk sizing.
 4. Run the simulation to view Equity Curves, Trade Distributions, VaR profiles, and ML Feature Importance charts.
+
+## MT5 Live Execution Bot (Proposal)
+
+While the engine current acts as an intelligent decision center and backtester, executing these trades live fully autonomously can be done safely using the built-in `EventBus`.
+
+**Architecture Workflow:**
+1. **Cron Scanner**: The `MarketScanner` runs on a scheduler (e.g., every 15 minutes) calling `run_scan()`.
+2. **Signal Dispatch**: When a strategy detects an entry, it fires a `TRADE_SIGNAL` event through the `utils.event_bus.EventBus`.
+3. **Execution Worker**: A background Python worker subscribed to `TRADE_SIGNAL` traps the payloads.
+4. **Order Packaging**: The worker maps the entry price, SL, TP, and calculated dynamic volume to the MT5 order struct via `MetaTrader5.order_send()`.
+5. **Risk Syncing**: Upon successful fill, the bot logs the active ticket id in an internal SQL database and allows trailing stops to be managed via tick-level listeners. 
 
 ---
 *Disclaimer: This software is for research and educational purposes only. Do not deploy algorithms on live accounts without rigorous paper-trading and capital risk assessment.*

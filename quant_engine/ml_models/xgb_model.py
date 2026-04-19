@@ -105,6 +105,8 @@ def _cached_walk_forward_train(
                 else:
                     fit_params['eval_set'] = [(X_eval, y_eval)]
                     fit_params['callbacks'] = [lgb.early_stopping(XGB_EARLY_STOPPING_ROUNDS, verbose=False)]
+                if model_type == 'lightgbm' and 'verbose' in fit_params:
+                    del fit_params['verbose']
                 model.fit(X_train_sub, y_train_sub, **fit_params)
                 predictions[cursor:segment_end] = model.predict_proba(
                     X_all.iloc[cursor:segment_end]
