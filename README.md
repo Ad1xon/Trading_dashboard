@@ -1,6 +1,6 @@
 # Institutional Quant Engine
 
-> Event-driven quantitative trading system with HMM regime detection, GARCH volatility modeling, ML-powered signal generation, and multi-source NLP sentiment analysis.
+Event-driven quantitative trading system with HMM regime detection, GARCH volatility modeling, ML-powered signal generation, and multi-source NLP sentiment analysis.
 
 ---
 
@@ -68,23 +68,23 @@ The system classifies market conditions into 3 hidden states using a Gaussian HM
 
 **Observation model.** Each bar produces features:
 
-$$\mathbf{x}_t = \begin{bmatrix} r_t \\ \sigma_t \end{bmatrix}, \quad r_t = \frac{P_t - P_{t-1}}{P_{t-1}}, \quad \sigma_t = \text{std}(r, 20)$$
+$$ \mathbf{x}_t = \begin{bmatrix} r_t \\ \sigma_t \end{bmatrix}, \quad r_t = \frac{P_t - P_{t-1}}{P_{t-1}}, \quad \sigma_t = \text{std}(r, 20) $$
 
 **Emission probability** for state $k$:
 
-$$P(\mathbf{x}_t \mid S_t = k) = \mathcal{N}(\mathbf{x}_t;\, {\mu}_k,\, {\Sigma}_k)$$
+$$ P(\mathbf{x}_t \mid S_t = k) = \mathcal{N}(\mathbf{x}_t; \mu_k, \Sigma_k) $$
 
 **Transition matrix** $\mathbf{A} \in \mathbb{R}^{3 \times 3}$:
 
-$$A_{ij} = P(S_t = j \mid S_{t-1} = i)$$
+$$ A_{ij} = P(S_t = j \mid S_{t-1} = i) $$
 
-Parameters $\{{\mu}_k, {\Sigma}_k, \mathbf{A}\}$ are estimated via the **Baum-Welch algorithm** (Expectation-Maximization). States are labelled by sorting on mean return: $\text{bear} < \text{range} < \text{bull}$.
+Parameters $\{\mu_k, \Sigma_k, \mathbf{A}\}$ are estimated via the **Baum-Welch algorithm** (Expectation-Maximization). States are labelled by sorting on mean return: $\text{bear} < \text{range} < \text{bull}$.
 
 ---
 
 ### GARCH(1,1) — Conditional Volatility
 
-$$\sigma_t^2 = \omega + \alpha\, r_{t-1}^2 + \beta\, \sigma_{t-1}^2$$
+$$ \sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta \sigma_{t-1}^2 $$
 
 | Parameter | Meaning | Default |
 |---|---|---|
@@ -96,19 +96,19 @@ $$\sigma_t^2 = \omega + \alpha\, r_{t-1}^2 + \beta\, \sigma_{t-1}^2$$
 
 **EWMA (RiskMetrics) variant:**
 
-$$\sigma_t^2 = \lambda\, \sigma_{t-1}^2 + (1 - \lambda)\, r_{t-1}^2, \quad \lambda = 0.94$$
+$$ \sigma_t^2 = \lambda \sigma_{t-1}^2 + (1 - \lambda) r_{t-1}^2, \quad \lambda = 0.94 $$
 
 **Application in strategies:** Adaptive SL/TP scaling:
 
-$$\text{SL}_t = \text{Close}_t - \underbrace{\frac{\hat{\sigma}_t}{\bar{\sigma}_{60}}}_{\text{GARCH scale}} \cdot m_{\text{SL}} \cdot \text{ATR}_t$$
+$$ \text{SL}_t = \text{Close}_t - \underbrace{\frac{\hat{\sigma}_t}{\bar{\sigma}_{60}}}_{\text{GARCH scale}} \cdot m_{\text{SL}} \cdot \text{ATR}_t $$
 
 ---
 
 ### Composite Alpha Score
 
-$$\text{Score}_t = w_{\text{trend}} \cdot M_t \cdot 0.35 + w_{\text{rev}} \cdot R_t \cdot 0.25 + V_t \cdot 0.20 + D_t \cdot 0.15 + G_t \cdot 0.05$$
+$$ \text{Score}_t = w_{\text{trend}} \cdot M_t \cdot 0.35 + w_{\text{rev}} \cdot R_t \cdot 0.25 + V_t \cdot 0.20 + D_t \cdot 0.15 + G_t \cdot 0.05 $$
 
-where $w_{\text{trend}} = \text{clip}\!\left(\frac{\text{ADX}}{40},\, 0,\, 1\right)$ and $w_{\text{rev}} = 1 - w_{\text{trend}}$.
+where $w_{\text{trend}} = \text{clip}\left( \frac{\text{ADX}}{40}, 0, 1 \right)$ and $w_{\text{rev}} = 1 - w_{\text{trend}}$.
 
 | Factor | Symbol | Computation |
 |---|---|---|
@@ -116,9 +116,9 @@ where $w_{\text{trend}} = \text{clip}\!\left(\frac{\text{ADX}}{40},\, 0,\, 1\rig
 | Reversion | $R_t$ | Inverted Bollinger %B (60%) + inverted RSI (40%) |
 | Volume | $V_t$ | Order-flow proxy z-score (70%) + volume surge (30%) |
 | MACD | $D_t$ | MACD histogram z-score (30-bar) |
-| Volatility | $G_t$ | Inverse GARCH ratio: $-({\hat{\sigma}_t}/{\bar{\sigma}_{60}} - 1)$ |
+| Volatility | $G_t$ | Inverse GARCH ratio: $-\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)$ |
 
-**Entry:** $\text{Score}_t > \theta_{\text{long}} = 0.15$ and volume above 80% of 20-bar average.
+**Entry:** $ \text{Score}_t > \theta_{\text{long}} = 0.15 $ and volume above 80% of 20-bar average.
 
 ---
 
@@ -128,21 +128,21 @@ where $w_{\text{trend}} = \text{clip}\!\left(\frac{\text{ADX}}{40},\, 0,\, 1\rig
 
 1. OLS regression on log-normalized prices:
 
-$$\log \tilde{Y}_t = \alpha + \beta \cdot \log \tilde{X}_t + \varepsilon_t$$
+$$ \log \tilde{Y}_t = \alpha + \beta \cdot \log \tilde{X}_t + \varepsilon_t $$
 
 2. ADF test on residuals $\varepsilon_t$. If $p < 0.10$, the pair is cointegrated.
 
 **Log-normalization** (prevents scale bias):
 
-$$\tilde{Y}_t = \frac{\log Y_t - \overline{\log Y}}{\text{std}(\log Y)}, \quad \tilde{X}_t = \frac{\log X_t - \overline{\log X}}{\text{std}(\log X)}$$
+$$ \tilde{Y}_t = \frac{\log Y_t - \overline{\log Y}}{\text{std}(\log Y)}, \quad \tilde{X}_t = \frac{\log X_t - \overline{\log X}}{\text{std}(\log X)} $$
 
 **Z-score of the spread:**
 
-$$Z_t = \frac{S_t - \bar{S}_n}{\sigma_{S,n}}, \quad S_t = \tilde{Y}_t - \beta\, \tilde{X}_t$$
+$$ Z_t = \frac{S_t - \bar{S}_n}{\sigma_{S,n}}, \quad S_t = \tilde{Y}_t - \beta \tilde{X}_t $$
 
 **Ornstein-Uhlenbeck half-life:**
 
-$$\Delta S_t = \varphi\, S_{t-1} + \varepsilon_t \implies \tau_{1/2} = -\frac{\ln 2}{\ln(1 + \varphi)}$$
+$$ \Delta S_t = \varphi S_{t-1} + \varepsilon_t \implies \tau_{1/2} = -\frac{\ln 2}{\ln(1 + \varphi)} $$
 
 ---
 
@@ -158,7 +158,7 @@ $$\Delta S_t = \varphi\, S_{t-1} + \varepsilon_t \implies \tau_{1/2} = -\frac{\l
 | ATR_14 | $\text{EMA}(\text{TrueRange}, 14)$ |
 | BB_%B | $(C_t - L_{\text{BB}}) / (U_{\text{BB}} - L_{\text{BB}})$ |
 | BB_Width | $(U_{\text{BB}} - L_{\text{BB}}) / M_{\text{BB}}$ |
-| ADX_14 | Smoothed $\|DI^+ - DI^-\| / (DI^+ + DI^-)$ |
+| ADX_14 | Smoothed $\vert DI^+ - DI^- \vert / (DI^+ + DI^-)$ |
 | Volume_Delta | $\frac{C - O}{H - L} \cdot V$ |
 | Return_Autocorr | $\text{corr}(r_t, r_{t-1}; w=20)$ |
 | Return_5 | $\ln(C_t / C_{t-5})$ |
@@ -168,7 +168,7 @@ $$\Delta S_t = \varphi\, S_{t-1} + \varepsilon_t \implies \tau_{1/2} = -\frac{\l
 
 **MFE-based target:**
 
-$$y_t = \begin{cases} 1 & \text{if } \min_{j \in [1,H]} \{j : H_{t+j} \geq C_t + m_{\text{TP}} \cdot \text{ATR}_t\} < \min_{j} \{j : L_{t+j} \leq C_t - m_{\text{SL}} \cdot \text{ATR}_t\} \\ 0 & \text{otherwise} \end{cases}$$
+$$ y_t = \begin{cases} 1 & \text{if } \min_{j \in [1,H]} \{j : H_{t+j} \geq C_t + m_{\text{TP}} \cdot \text{ATR}_t\} < \min_{j} \{j : L_{t+j} \leq C_t - m_{\text{SL}} \cdot \text{ATR}_t\} \\ 0 & \text{otherwise} \end{cases} $$
 
 **Walk-forward protocol:** 70% initial train → predict next 1000 bars → retrain on expanded window → repeat. Purged gap = $2H$ bars to prevent leakage.
 
@@ -178,18 +178,18 @@ $$y_t = \begin{cases} 1 & \text{if } \min_{j \in [1,H]} \{j : H_{t+j} \geq C_t +
 
 **Architecture:**
 
-$$\mathbf{x}_t \in \mathbb{R}^{30 \times 6} \xrightarrow{\text{LSTM}(128, 2\text{ layers})} \mathbf{h}_T \xrightarrow{\text{FC}(64)} \xrightarrow{\text{FC}(1)} \xrightarrow{\sigma} \hat{p}_t \in [0, 1]$$
+$$ \mathbf{x}_t \in \mathbb{R}^{30 \times 6} \longrightarrow \text{LSTM}(128, \text{2 layers}) \longrightarrow \mathbf{h}_T \longrightarrow \text{FC}(64) \longrightarrow \text{FC}(1) \longrightarrow \sigma \longrightarrow \hat{p}_t \in [0, 1] $$
 
 **LSTM cell equations:**
 
-$$\begin{aligned}
+$$ \begin{aligned}
 \mathbf{f}_t &= \sigma(\mathbf{W}_f [\mathbf{h}_{t-1}, \mathbf{x}_t] + \mathbf{b}_f) & \text{(forget gate)} \\
 \mathbf{i}_t &= \sigma(\mathbf{W}_i [\mathbf{h}_{t-1}, \mathbf{x}_t] + \mathbf{b}_i) & \text{(input gate)} \\
 \tilde{\mathbf{C}}_t &= \tanh(\mathbf{W}_C [\mathbf{h}_{t-1}, \mathbf{x}_t] + \mathbf{b}_C) & \text{(candidate)} \\
 \mathbf{C}_t &= \mathbf{f}_t \odot \mathbf{C}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{C}}_t & \text{(cell state)} \\
 \mathbf{o}_t &= \sigma(\mathbf{W}_o [\mathbf{h}_{t-1}, \mathbf{x}_t] + \mathbf{b}_o) & \text{(output gate)} \\
 \mathbf{h}_t &= \mathbf{o}_t \odot \tanh(\mathbf{C}_t) & \text{(hidden state)}
-\end{aligned}$$
+\end{aligned} $$
 
 ---
 
@@ -197,35 +197,35 @@ $$\begin{aligned}
 
 **Value-at-Risk (Historical):**
 
-$$\text{VaR}_\alpha = \text{Percentile}(r, (1-\alpha) \times 100)$$
+$$ \text{VaR}_\alpha = \text{Percentile}(r, (1-\alpha) \times 100) $$
 
 **Conditional VaR (Expected Shortfall):**
 
-$$\text{CVaR}_\alpha = \mathbb{E}[r \mid r \leq \text{VaR}_\alpha]$$
+$$ \text{CVaR}_\alpha = \mathbb{E}[r \mid r \leq \text{VaR}_\alpha] $$
 
 **Cornish-Fisher VaR** (fat-tail adjustment):
 
-$$z_{\text{CF}} = z_\alpha + \frac{z_\alpha^2 - 1}{6}\, S + \frac{z_\alpha^3 - 3z_\alpha}{24}\, K - \frac{2z_\alpha^3 - 5z_\alpha}{36}\, S^2$$
+$$ z_{\text{CF}} = z_\alpha + \frac{z_\alpha^2 - 1}{6}\, S + \frac{z_\alpha^3 - 3z_\alpha}{24}\, K - \frac{2z_\alpha^3 - 5z_\alpha}{36}\, S^2 $$
 
-$$\text{VaR}_{\text{CF}} = \mu + z_{\text{CF}} \cdot \sigma$$
+$$ \text{VaR}_{\text{CF}} = \mu + z_{\text{CF}} \cdot \sigma $$
 
 where $S = \text{skewness}(r)$, $K = \text{excess kurtosis}(r)$.
 
 **Sharpe Ratio:**
 
-$$\text{Sharpe} = \frac{\mathbb{E}[r]}{\sigma(r)} \cdot \sqrt{252}$$
+$$ \text{Sharpe} = \frac{\mathbb{E}[r]}{\sigma(r)} \cdot \sqrt{252} $$
 
 **Sortino Ratio:**
 
-$$\text{Sortino} = \frac{\mathbb{E}[r]}{\sigma_{\text{down}}(r)} \cdot \sqrt{252}, \quad \sigma_{\text{down}} = \text{std}(r \mid r < 0)$$
+$$ \text{Sortino} = \frac{\mathbb{E}[r]}{\sigma_{\text{down}}(r)} \cdot \sqrt{252}, \quad \sigma_{\text{down}} = \text{std}(r \mid r < 0) $$
 
 **Calmar Ratio:**
 
-$$\text{Calmar} = \frac{r_{\text{ann}}}{|\text{MaxDD}|}$$
+$$ \text{Calmar} = \frac{r_{\text{ann}}}{|\text{MaxDD}|} $$
 
 **Kelly Criterion:**
 
-$$f^* = \frac{p \cdot b - q}{b}, \quad b = \frac{\bar{w}}{\bar{l}}, \quad q = 1 - p$$
+$$ f^* = \frac{p \cdot b - q}{b}, \quad b = \frac{\bar{w}}{\bar{l}}, \quad q = 1 - p $$
 
 Capped at $f^* \leq 0.25$ (fractional Kelly).
 
@@ -249,7 +249,7 @@ Capped at $f^* \leq 0.25$ (fractional Kelly).
 
 5 free RSS sources aggregated with weighted FinBERT scoring:
 
-$$\text{Score}_{\text{final}} = \frac{\sum_{i \in \mathcal{A}} w_i \cdot s_i}{\sum_{i \in \mathcal{A}} w_i}$$
+$$ \text{Score}_{\text{final}} = \frac{\sum_{i \in \mathcal{A}} w_i \cdot s_i}{\sum_{i \in \mathcal{A}} w_i} $$
 
 where $\mathcal{A}$ is the set of sources that returned data.
 
@@ -266,7 +266,7 @@ where $\mathcal{A}$ is the set of sources that returned data.
 ## Installation
 
 ```bash
-git clone https://github.com/Ad1xon/Trading_dashboard.git
+git clone [https://github.com/Ad1xon/Trading_dashboard.git](https://github.com/Ad1xon/Trading_dashboard.git)
 cd PythonProject
 pip install -r requirements.txt
 ```
