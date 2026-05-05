@@ -126,7 +126,7 @@ $$
 G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)
 $$
 
-**Entry Condition:** $\text{Score}_t > \theta_{\text{long}} = 0.15$ and volume > 80% of 20-bar avg.
+**Entry Condition:** Score<sub>t</sub> > θ<sub>long</sub> = 0.15 and volume > 80% of 20-bar avg.
 
 ---
 
