@@ -126,11 +126,8 @@ $$
 G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)
 $$
 
-**Entry Condition:**
+**Entry Condition:** $\text{Score}_t > \theta_{\text{long}} = 0.15$ and volume > 80% of 20-bar avg.
 
-$$
-\text{Score}_t > \theta_{\text{long}} = 0.15 \quad \text{and} \quad \text{volume} > 80\% \text{ of 20-bar avg.}
-$$
 ---
 
 ### Cointegration — Pairs Trading
