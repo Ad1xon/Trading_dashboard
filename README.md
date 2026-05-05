@@ -106,7 +106,9 @@ $$ \text{SL}_t = \text{Close}_t - \underbrace{\frac{\hat{\sigma}_t}{\bar{\sigma}
 
 ### Composite Alpha Score
 
-$$ \text{Score}_t = w_{\text{trend}} \cdot M_t \cdot 0.35 + w_{\text{rev}} \cdot R_t \cdot 0.25 + V_t \cdot 0.20 + D_t \cdot 0.15 + G_t \cdot 0.05 $$
+$$
+\text{Score}_t = w_{\text{trend}} \cdot M_t \cdot 0.35 + w_{\text{rev}} \cdot R_t \cdot 0.25 + V_t \cdot 0.20 + D_t \cdot 0.15 + G_t \cdot 0.05
+$$
 
 where $w_{\text{trend}} = \text{clip}\left( \frac{\text{ADX}}{40}, 0, 1 \right)$ and $w_{\text{rev}} = 1 - w_{\text{trend}}$.
 
@@ -119,10 +121,16 @@ where $w_{\text{trend}} = \text{clip}\left( \frac{\text{ADX}}{40}, 0, 1 \right)$
 | Volatility | $G_t$ | Inverse GARCH ratio |
 
 **Inverse GARCH ratio formula:**
-$$ G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right) $$
+
+$$
+G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)
+$$
 
 **Entry Condition:**
-$$ \text{Score}_t > \theta_{\text{long}} = 0.15 \quad \text{and} \quad \text{volume} > 80\% \text{ of 20-bar avg.} $$
+
+$$
+\text{Score}_t > \theta_{\text{long}} = 0.15 \quad \text{and} \quad \text{volume} > 80\% \text{ of 20-bar avg.}
+$$
 ---
 
 ### Cointegration — Pairs Trading
