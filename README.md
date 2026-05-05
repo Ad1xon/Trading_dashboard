@@ -116,10 +116,13 @@ where $w_{\text{trend}} = \text{clip}\left( \frac{\text{ADX}}{40}, 0, 1 \right)$
 | Reversion | $R_t$ | Inverted Bollinger %B (60%) + inverted RSI (40%) |
 | Volume | $V_t$ | Order-flow proxy z-score (70%) + volume surge (30%) |
 | MACD | $D_t$ | MACD histogram z-score (30-bar) |
-| Volatility | $G_t$ | Inverse GARCH ratio: $-\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)$ |
+| Volatility | $G_t$ | Inverse GARCH ratio |
 
-**Entry:** $ \text{Score}_t > \theta_{\text{long}} = 0.15 $ and volume above 80% of 20-bar average.
+**Inverse GARCH ratio formula:**
+$$ G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right) $$
 
+**Entry Condition:**
+$$ \text{Score}_t > \theta_{\text{long}} = 0.15 \quad \text{and} \quad \text{volume} > 80\% \text{ of 20-bar avg.} $$
 ---
 
 ### Cointegration — Pairs Trading
@@ -266,7 +269,7 @@ where $\mathcal{A}$ is the set of sources that returned data.
 ## Installation
 
 ```bash
-git clone [https://github.com/Ad1xon/Trading_dashboard.git](https://github.com/Ad1xon/Trading_dashboard.git)
+git clone https://github.com/Ad1xon/Trading_dashboard.git
 cd PythonProject
 pip install -r requirements.txt
 ```
