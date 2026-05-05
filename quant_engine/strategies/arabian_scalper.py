@@ -5,7 +5,11 @@ import numpy as np
 from .base import BaseStrategy
 from ..indicators import calculate_atr
 from ..ml_models import LGBMRangeBarModel
-from data_feed.nlp_engine import SentimentEngine
+
+try:
+    from data_feed.nlp_engine import SentimentEngine
+except ImportError:
+    SentimentEngine = None
 
 
 class ArabianScalper(BaseStrategy):

@@ -156,9 +156,10 @@ class XGBoostRangeBarModel:
         feature_cols: list | None = None,
     ):
         self.feature_cols = feature_cols or [
-            'Vol_Ratio', 'Close_Diff',
+            'Vol_Ratio', 'Dir_Sum_5',
             'RSI_14', 'ATR_14', 'BB_PctB', 'BB_Width',
             'ADX_14', 'Volume_Delta', 'Return_Autocorr', 'Return_5',
+            'Variance_Ratio', 'GARCH_Vol',
             'Sentiment_Score',
         ]
 
@@ -179,6 +180,8 @@ class XGBoostRangeBarModel:
 
     def build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Construct the full feature matrix from OHLCV data."""
+        from ..volatility_model import fit_garch_volatility
+
         data = df.copy()
         data['Dir'] = np.where(data['Close'] > data['Open'], 1, -1)
         data['Dir_Sum_5'] = data['Dir'].rolling(5).sum()
@@ -197,6 +200,9 @@ class XGBoostRangeBarModel:
         data['Volume_Delta'] = calculate_orderflow_proxy(data)
         data['Return_Autocorr'] = calculate_return_autocorrelation(data['Close'], 20, 1)
         data['Return_5'] = np.log(data['Close'] / data['Close'].shift(5).clip(lower=1e-10))
+
+        returns = data['Close'].pct_change().fillna(0)
+        data['GARCH_Vol'] = fit_garch_volatility(returns)
 
         if 'Sentiment_Score' not in data.columns:
             data['Sentiment_Score'] = 0.0

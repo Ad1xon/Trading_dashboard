@@ -1,7 +1,8 @@
-"""Dashboard views — scanner, backtester, alert center, macro & sentiment."""
+"""Dashboard views — scanner, backtester, alert center, macro & sentiment, pairs trading, risk analytics."""
 
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 import numpy as np
 import MetaTrader5 as mt5
@@ -9,7 +10,7 @@ from datetime import timedelta
 
 from config import (
     load_translations, MT5_SYMBOLS, COMMISSION_USD_PER_LOT,
-    CONTRACT_SIZES,
+    CONTRACT_SIZES, PAIRS_TRADING_PAIRS,
 )
 from data_feed.mt5_connector import get_mt5_data
 from data_feed.nlp_engine import SentimentEngine
@@ -19,12 +20,17 @@ from quant_engine.strategies import STRATEGY_REGISTRY, detect_liquidity_sweep
 from quant_engine.indicators import (
     calculate_vwap_with_bands, calculate_rsi, calculate_atr,
 )
+from quant_engine.risk_metrics import (
+    compute_kelly_fraction, compute_mae_mfe, compute_parametric_var,
+)
+from quant_engine.strategy_optimizer import monte_carlo_simulation
+from quant_engine.stat_arb import test_cointegration
 from alerts.alert_manager import AlertManager
 from quant_engine.macro_filter import MacroFilter
 from quant_engine.scanner import MarketScanner
 
 
-SWING_STRATEGIES = {'LSTM Swing'}
+SWING_STRATEGIES = {'LSTM Swing', 'Composite Alpha (MFT)', 'Regime Switch (HMM)'}
 
 
 def _get_alert_manager() -> AlertManager:
@@ -218,7 +224,7 @@ def render_backtester_view(lang: str):
             )
 
             if results.get('bankrupt'):
-                st.error("⚠️ MARGIN CALL — Account went bankrupt during simulation!")
+                st.error("MARGIN CALL — Account went bankrupt during simulation!")
 
             c1, c2, c3, c4 = st.columns(4)
             data_days = (trading_data.index[-1] - trading_data.index[0]).days if isinstance(trading_data.index, pd.DatetimeIndex) and len(trading_data) > 0 else 0
@@ -251,17 +257,28 @@ def render_backtester_view(lang: str):
 
             c13, c14, c15, c16 = st.columns(4)
             _colored_metric(c13, "VaR (95%)", results.get('var_95', 0.0) * 100, fmt="{:.3f}%", invert=True,
-                            help="Value at Risk: The expected maximum loss at a 95% confidence interval.")
+                            help="Value at Risk: max loss at 95% confidence. Formula: percentile(returns, 5%).")
             _colored_metric(c14, "CVaR (95%)", results.get('cvar_95', 0.0) * 100, fmt="{:.3f}%", invert=True,
-                            help="Conditional VaR: The average loss in the worst 5% of cases.")
-            c15.metric("", "")
-            c16.metric("", "")
+                            help="Expected Shortfall: E[loss | loss > VaR]. Mean of worst 5% scenarios.")
+
+            kelly = compute_kelly_fraction(
+                results['win_rate'], results['avg_win'], results['avg_loss'],
+            )
+            c15.metric("Kelly Fraction", f"{kelly * 100:.1f}%",
+                       help="Optimal bet size: f* = (p·b − q)/b, capped at 25%.")
+
+            mae_mfe = compute_mae_mfe(results['trades_history'])
+            c16.metric("Trade Efficiency", f"{mae_mfe['efficiency'] * 100:.1f}%",
+                       help="MAE/MFE ratio — how much of the move is captured.")
 
             _render_price_chart(trading_data, results)
             _render_equity_chart(results, t)
             _render_drawdown_chart(results, t)
             _render_pnl_distribution(results, t)
             _render_trade_table(results, t)
+            _render_monthly_heatmap(results)
+            _render_rolling_sharpe(results)
+            _render_monte_carlo(results, capital)
 
             if hasattr(strat, 'ml_model') and getattr(strat.ml_model, 'is_trained', False):
                 st.subheader(f"{strategy_choice} Feature Importance")
@@ -290,7 +307,7 @@ def render_alert_view(lang: str):
     t = load_translations(lang)
     alert_mgr = _get_alert_manager()
 
-    st.sidebar.header("⚡ Alerts Config")
+    st.sidebar.header("Alerts Config")
     webhook = st.sidebar.text_input(
         t.get("alert_webhook", "Discord Webhook URL"),
         type="password", key="discord_webhook",
@@ -332,10 +349,10 @@ def render_alert_view(lang: str):
 def render_sentiment_view(lang: str):
     """Render the Global Macro & Sentiment Heatmap tab."""
     st.subheader("Global Macro & Sentiment Heatmap")
-    st.markdown("Powered by **FinBERT NLP** & **ForexFactory XML Feed**")
+    st.markdown("Powered by **FinBERT NLP** — Sources: Google News, Yahoo Finance, Reddit, Investing.com")
 
     if st.button("Refresh Global Data", key="btn_refresh_macro"):
-        with st.spinner("Analyzing NLP news sentiment & global calendar..."):
+        with st.spinner("Analyzing multi-source NLP sentiment & macro calendar..."):
 
             nlp = SentimentEngine()
             sent_data = []
@@ -353,7 +370,7 @@ def render_sentiment_view(lang: str):
 
                 sent_data.append({
                     "Instrument": sym_name,
-                    "FinBERT Score": score,
+                    "Aggregate Score": score,
                     "Regime Bias": bias,
                 })
 
@@ -366,11 +383,11 @@ def render_sentiment_view(lang: str):
                     return "color: #ff4444; font-weight: bold"
                 return "color: #aaaaaa"
 
-            st.markdown("### Natural Language Processing (News)")
+            st.markdown("### Multi-Source NLP Sentiment")
             st.dataframe(
                 df_sent.style.map(
                     _color_bias, subset=["Regime Bias"],
-                ).format({"FinBERT Score": "{:.2f}"}),
+                ).format({"Aggregate Score": "{:.3f}"}),
                 use_container_width=True,
             )
 
@@ -553,6 +570,212 @@ def _render_trade_table(results, t):
         use_container_width=True,
         height=300,
     )
+
+
+def _render_monthly_heatmap(results):
+    """Monthly returns heatmap — classic quant fund tearsheet element."""
+    eq = results['equity_curve']
+    if not isinstance(eq.index, pd.DatetimeIndex):
+        return
+    strat_eq = eq['Strategy_Equity']
+    monthly = strat_eq.resample('ME').last().pct_change().dropna()
+    if len(monthly) < 2:
+        return
+    st.subheader("Monthly Returns Heatmap")
+    df_m = pd.DataFrame({
+        'Year': monthly.index.year,
+        'Month': monthly.index.month,
+        'Return': monthly.values * 100,
+    })
+    pivot = df_m.pivot_table(index='Year', columns='Month', values='Return', aggfunc='sum')
+    pivot.columns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][:len(pivot.columns)]
+    fig = px.imshow(
+        pivot.values, x=pivot.columns.tolist(), y=[str(y) for y in pivot.index],
+        color_continuous_scale='RdYlGn', aspect='auto',
+        labels={'color': 'Return %'},
+    )
+    fig.update_layout(template='plotly_dark', height=250)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_rolling_sharpe(results):
+    """Rolling 60-bar Sharpe ratio chart."""
+    eq = results['equity_curve']['Strategy_Equity']
+    rets = eq.pct_change().dropna()
+    if len(rets) < 60:
+        return
+    st.subheader("Rolling Sharpe Ratio (60-bar)")
+    rolling_sharpe = (rets.rolling(60).mean() / (rets.rolling(60).std() + 1e-10)) * np.sqrt(252)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        y=rolling_sharpe.values, mode='lines',
+        line=dict(color='#00ccff', width=1.5), name='Rolling Sharpe',
+    ))
+    fig.add_hline(y=0, line_dash='dash', line_color='#555')
+    fig.add_hline(y=1, line_dash='dot', line_color='#00ff88', annotation_text='Target')
+    fig.update_layout(template='plotly_dark', height=250, yaxis_title='Sharpe')
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_monte_carlo(results, initial_capital):
+    """Bootstrap Monte Carlo simulation cone chart."""
+    trades = results.get('trades_history', [])
+    if len(trades) < 10:
+        return
+    st.subheader("Monte Carlo Simulation (1000 paths)")
+    mc = monte_carlo_simulation(trades, initial_capital, n_simulations=1000)
+    eq_pct = mc['terminal_equity_percentiles']
+    dd_pct = mc['max_drawdown_percentiles']
+    c1, c2, c3 = st.columns(3)
+    c1.metric("P(Ruin)", f"{mc['ruin_probability']*100:.1f}%")
+    c2.metric("Median Terminal", f"${eq_pct.get('50%', 0):,.0f}")
+    c3.metric("5th Pctile DD", f"{dd_pct.get('5%', 0)*100:.1f}%")
+    pctile_df = pd.DataFrame({
+        'Percentile': list(eq_pct.keys()),
+        'Terminal Equity': [f"${v:,.0f}" for v in eq_pct.values()],
+        'Max Drawdown': [f"{v*100:.1f}%" for v in dd_pct.values()],
+    })
+    st.dataframe(pctile_df, use_container_width=True, height=200)
+
+
+def render_pairs_trading_view(lang: str):
+    """Render Pairs Trading / Statistical Arbitrage analysis tab."""
+    st.subheader("Pairs Trading — Statistical Arbitrage")
+    st.markdown("Multi-method cointegration testing (Engle-Granger + ADF) with log-normalized spreads.")
+
+    pair_options = [f"{a} / {b}" for a, b in PAIRS_TRADING_PAIRS]
+    selected_pair = st.selectbox("Select Pair", pair_options, key="pairs_select")
+    days = st.slider("Lookback (days)", 30, 730, 365, key="pairs_days")
+
+    if st.button("Analyze Pair", key="btn_pairs"):
+        idx = pair_options.index(selected_pair)
+        mt5_a, mt5_b = PAIRS_TRADING_PAIRS[idx]
+        with st.spinner("Fetching data & running cointegration test..."):
+            df_a = get_mt5_data(mt5_a, days, timeframe=mt5.TIMEFRAME_H1)
+            df_b = get_mt5_data(mt5_b, days, timeframe=mt5.TIMEFRAME_H1)
+            if df_a.empty or df_b.empty:
+                st.error("Failed to retrieve data for one or both instruments.")
+                return
+            min_len = min(len(df_a), len(df_b))
+            close_a = df_a['Close'].iloc[-min_len:].reset_index(drop=True)
+            close_b = df_b['Close'].iloc[-min_len:].reset_index(drop=True)
+            result = test_cointegration(close_a, close_b)
+
+            c1, c2, c3, c4 = st.columns(4)
+            coint_color = "#00ff88" if result['is_cointegrated'] else "#ff4444"
+            c1.markdown(f"<div style='text-align:center'><small style='color:#aaa'>Cointegrated</small><br>"
+                        f"<span style='font-size:1.4em;font-weight:bold;color:{coint_color}'>"
+                        f"{'YES' if result['is_cointegrated'] else 'NO'}</span></div>",
+                        unsafe_allow_html=True)
+            c2.metric("Best P-Value", f"{result['p_value']:.4f}")
+            c3.metric("Hedge Ratio (β)", f"{result['beta']:.4f}")
+            c4.metric("Method", result.get('method', 'N/A'))
+
+            if result.get('adf_p_value') is not None:
+                st.caption(f"ADF Spread Stationarity p-value: {result['adf_p_value']:.4f}")
+
+            norm_a = (close_a - close_a.mean()) / (close_a.std() + 1e-10)
+            norm_b = (close_b - close_b.mean()) / (close_b.std() + 1e-10)
+            fig_norm = go.Figure()
+            fig_norm.add_trace(go.Scatter(y=norm_a.values, mode='lines', name=mt5_a,
+                                          line=dict(color='#00ccff', width=1.5)))
+            fig_norm.add_trace(go.Scatter(y=norm_b.values, mode='lines', name=mt5_b,
+                                          line=dict(color='#ffaa00', width=1.5)))
+            fig_norm.update_layout(template='plotly_dark', height=250,
+                                   title='Normalized Price Overlay (z-score)')
+            st.plotly_chart(fig_norm, use_container_width=True)
+
+            fig = go.Figure()
+            z = result['z_score'].dropna()
+            fig.add_trace(go.Scatter(y=z.values, mode='lines', name='Z-Score',
+                                     line=dict(color='#00ccff', width=1.5)))
+            fig.add_hline(y=2, line_dash='dash', line_color='#ff4444')
+            fig.add_hline(y=-2, line_dash='dash', line_color='#00ff88')
+            fig.add_hline(y=0, line_dash='dot', line_color='#555')
+            fig.update_layout(template='plotly_dark', height=350, title='Spread Z-Score')
+            st.plotly_chart(fig, use_container_width=True)
+
+            spread = result['spread'].dropna()
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(y=spread.values, mode='lines', name='Spread',
+                                      line=dict(color='#ffaa00', width=1.5)))
+            fig2.update_layout(template='plotly_dark', height=250,
+                               title=f'Spread: log({mt5_a}) − β·log({mt5_b})')
+            st.plotly_chart(fig2, use_container_width=True)
+
+
+def render_strategy_comparison_view(lang: str):
+    """Render multi-strategy comparison tab."""
+    t = load_translations(lang)
+    st.subheader("Strategy Leaderboard — Multi-Strategy Comparison")
+    st.markdown("Compare all selected strategies on the same instrument and timeframe.")
+
+    selected_name = st.selectbox("Instrument", list(MT5_SYMBOLS.keys()), key="cmp_symbol")
+    symbol = MT5_SYMBOLS[selected_name]
+
+    strat_choices = st.multiselect(
+        "Select Strategies to Compare",
+        list(STRATEGY_REGISTRY.keys()),
+        default=list(STRATEGY_REGISTRY.keys())[:4],
+        key="cmp_strategies",
+    )
+
+    tf_options = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
+    data_mode = st.selectbox("Timeframe", list(tf_options.keys()), index=1, key="cmp_tf")
+    days_back = st.slider("History (days)", 30, 2000, 365, key="cmp_days")
+    capital = st.number_input("Capital ($)", value=10000.0, key="cmp_capital")
+    risk = st.number_input("Risk (%)", value=2.0, key="cmp_risk") / 100.0
+
+    if st.button("Run Comparison", key="btn_compare") and strat_choices:
+        mt5_tf = tf_options[data_mode]
+        df_raw = get_mt5_data(symbol, days_back, timeframe=mt5_tf)
+        if df_raw.empty or len(df_raw) < 50:
+            st.error("Failed to retrieve sufficient data.")
+            return
+
+        contract = CONTRACT_SIZES.get(symbol, 100000)
+        comm_pct = COMMISSION_USD_PER_LOT / contract
+        all_results = {}
+        progress = st.progress(0)
+
+        for i, sn in enumerate(strat_choices):
+            try:
+                strat = STRATEGY_REGISTRY[sn]()
+                res = run_advanced_backtest(df_raw.copy(), capital, risk, 0.0001, strat, comm_pct, symbol=symbol)
+                all_results[sn] = res
+            except Exception as exc:
+                st.warning(f"{sn}: {exc}")
+            progress.progress((i + 1) / len(strat_choices))
+
+        if not all_results:
+            return
+
+        rows = []
+        for name, res in all_results.items():
+            rows.append({
+                "Strategy": name, "Return %": f"{res['total_return']*100:.2f}",
+                "Sharpe": f"{res['sharpe_ratio']:.2f}", "Sortino": f"{res['sortino_ratio']:.2f}",
+                "Calmar": f"{res['calmar_ratio']:.2f}", "Max DD %": f"{res['max_drawdown']*100:.2f}",
+                "Win %": f"{res['win_rate']*100:.1f}", "PF": f"{res['profit_factor']:.2f}",
+                "Trades": res['n_trades'], "VaR95 %": f"{res.get('var_95',0)*100:.3f}",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=350)
+
+        eq_fig = go.Figure()
+        colors = ['#00ff88','#ff4444','#00ccff','#ffaa00','#cc66ff','#ff6699','#66ffcc','#ff9933','#9999ff','#33cc33']
+        for i, (name, res) in enumerate(all_results.items()):
+            eq = res['equity_curve']['Strategy_Equity']
+            eq_fig.add_trace(go.Scatter(y=eq.values, mode='lines', name=name, line=dict(color=colors[i%10], width=2)))
+        eq_fig.update_layout(template='plotly_dark', height=450, yaxis_title='Equity ($)')
+        st.plotly_chart(eq_fig, use_container_width=True)
+
+        dd_fig = go.Figure()
+        for i, (name, res) in enumerate(all_results.items()):
+            dd = res.get('drawdown_series')
+            if dd is not None:
+                dd_fig.add_trace(go.Scatter(y=dd.values*100, mode='lines', name=name, line=dict(color=colors[i%10], width=1.5)))
+        dd_fig.update_layout(template='plotly_dark', height=300, yaxis_title='Drawdown %')
+        st.plotly_chart(dd_fig, use_container_width=True)
 
 
 def _colored_metric(

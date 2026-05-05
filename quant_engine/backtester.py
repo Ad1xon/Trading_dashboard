@@ -38,12 +38,15 @@ def run_advanced_backtest(
     contract_size = CONTRACT_SIZES.get(symbol, 100_000.0)
     swap_long = -0.5
     swap_short = -0.5
-    if mt5.terminal_info() is not None:
-        sym_info = mt5.symbol_info(symbol)
-        if sym_info is not None:
-            contract_size = sym_info.trade_contract_size
-            swap_long = sym_info.swap_long if hasattr(sym_info, 'swap_long') else -0.5
-            swap_short = sym_info.swap_short if hasattr(sym_info, 'swap_short') else -0.5
+    try:
+        if mt5.terminal_info() is not None:
+            sym_info = mt5.symbol_info(symbol)
+            if sym_info is not None:
+                contract_size = sym_info.trade_contract_size
+                swap_long = getattr(sym_info, 'swap_long', -0.5)
+                swap_short = getattr(sym_info, 'swap_short', -0.5)
+    except Exception:
+        pass
 
     slippage_model = DynamicSlippageModel(
         base_bps=SLIPPAGE_BASE_BPS,

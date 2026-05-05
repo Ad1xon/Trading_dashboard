@@ -1,4 +1,4 @@
-"""Tests for quant_engine.strategies — signal generation, SL/TP columns."""
+"""Tests for quant_engine.strategies — signal generation, SL/TP columns, registry."""
 
 import numpy as np
 import pandas as pd
@@ -10,10 +10,12 @@ from quant_engine.strategies import (
     MLVolatilityBreakout,
     VWAPBounceStrategy,
     MultiTimeframeMomentum,
+    PairsTradingStrategy,
+    RegimeSwitchStrategy,
+    CompositeAlphaStrategy,
     STRATEGY_REGISTRY,
     detect_liquidity_sweep,
 )
-
 
 
 REQUIRED_COLUMNS = ['Signal', 'Exit_Long', 'Exit_Short', 'Std', 'SL_Price', 'Max_Hold']
@@ -27,6 +29,8 @@ class TestStrategyContract:
         VolatilityBreakout,
         VWAPBounceStrategy,
         MultiTimeframeMomentum,
+        CompositeAlphaStrategy,
+        RegimeSwitchStrategy,
     ])
     def test_required_columns(self, synthetic_ohlcv, strat_cls):
         strat = strat_cls()
@@ -39,6 +43,8 @@ class TestStrategyContract:
         VolatilityBreakout,
         VWAPBounceStrategy,
         MultiTimeframeMomentum,
+        CompositeAlphaStrategy,
+        RegimeSwitchStrategy,
     ])
     def test_signal_values(self, synthetic_ohlcv, strat_cls):
         """Signal column should only contain -1, 0, or 1."""
@@ -46,6 +52,42 @@ class TestStrategyContract:
         result = strat.generate_signals(synthetic_ohlcv.copy())
         assert set(result['Signal'].unique()).issubset({-1, 0, 1})
 
+
+class TestCompositeAlpha:
+    """Composite Alpha must generate trades — previously zero due to threshold bug."""
+
+    def test_generates_signals(self, synthetic_ohlcv):
+        strat = CompositeAlphaStrategy()
+        result = strat.generate_signals(synthetic_ohlcv.copy())
+        n_signals = (result['Signal'] != 0).sum()
+        assert n_signals > 0, "Composite Alpha should generate at least some signals"
+
+    def test_composite_score_column(self, synthetic_ohlcv):
+        strat = CompositeAlphaStrategy()
+        result = strat.generate_signals(synthetic_ohlcv.copy())
+        assert 'Composite_Score' in result.columns
+        assert result['Composite_Score'].notna().sum() > 0
+
+    def test_garch_vol_present(self, synthetic_ohlcv):
+        strat = CompositeAlphaStrategy()
+        result = strat.generate_signals(synthetic_ohlcv.copy())
+        assert 'GARCH_Vol' in result.columns
+
+    def test_sl_tp_set_on_signals(self, synthetic_ohlcv):
+        strat = CompositeAlphaStrategy()
+        result = strat.generate_signals(synthetic_ohlcv.copy())
+        has_signal = result['Signal'] != 0
+        if has_signal.any():
+            sl_set = result.loc[has_signal, 'SL_Price'].notna().any()
+            assert sl_set, "SL should be set on signal bars"
+
+
+class TestRegimeSwitch:
+    def test_regime_column_added(self, synthetic_ohlcv):
+        strat = RegimeSwitchStrategy()
+        result = strat.generate_signals(synthetic_ohlcv.copy())
+        assert 'Regime' in result.columns
+        assert set(result['Regime'].unique()).issubset({'bear', 'range', 'bull'})
 
 
 class TestMLVolatilityBreakout:
@@ -61,7 +103,6 @@ class TestMLVolatilityBreakout:
         assert 'Bull_Prob' in result.columns
         valid = result['Bull_Prob'].dropna()
         assert (valid >= 0).all() and (valid <= 1).all()
-
 
 
 class TestZScoreMeanReversion:
@@ -92,7 +133,6 @@ class TestZScoreMeanReversion:
         assert len(ranges) > 0
 
 
-
 class TestVolatilityBreakout:
     def test_breakout_on_new_high(self):
         """A price breaking above the rolling high should trigger long."""
@@ -104,7 +144,7 @@ class TestVolatilityBreakout:
             'High': close + 0.3,
             'Low': close - 0.3,
             'Close': close,
-            'Volume': np.full(n, 5000.0),  
+            'Volume': np.full(n, 5000.0),
         }, index=pd.date_range('2025-01-01', periods=n, freq='1min'))
 
         strat = VolatilityBreakout(lookback=20, vol_mult=0.5)
@@ -112,21 +152,26 @@ class TestVolatilityBreakout:
         assert (result['Signal'] == 1).any(), "Should detect breakout on new high"
 
 
-
 class TestStrategyRegistry:
     def test_registry_complete(self):
         expected = {
-            'ZScore Rev', 'SMC Breakout', 'XGB Breakout',
-            'XGB Bounce', 'VWAP Bounce', 'MTF Momentum',
-            'LGBM Arab Scalp', 'LSTM Swing',
+            'Composite Alpha (MFT)', 'LSTM Swing', 'Regime Switch (HMM)',
+            'XGB Breakout (ML)', 'LGBM Arab Scalp (ML)', 'Pairs Trading (Stat Arb)',
+            'MTF Momentum', 'VWAP Bounce', 'SMC Breakout', 'ZScore Rev',
         }
         assert set(STRATEGY_REGISTRY.keys()) == expected
 
     def test_registry_instantiation(self):
         for name, cls in STRATEGY_REGISTRY.items():
-            instance = cls()
+            if 'LSTM' in name:
+                try:
+                    instance = cls()
+                except TypeError:
+                    pytest.skip(f"{name} requires torch")
+                    continue
+            else:
+                instance = cls()
             assert hasattr(instance, 'generate_signals'), f"{name} missing generate_signals"
-
 
 
 class TestLiquiditySweep:

@@ -74,7 +74,7 @@ def walk_forward_optimization(
     metric: str = 'sharpe_ratio',
     indicator_warmup: int = 120,
 ) -> dict:
-    """Walk-forward optimisation with in-sample optimisation and     out-of-sample validation on each fold."""
+    """Walk-forward optimisation with in-sample optimisation and out-of-sample validation on each fold."""
     if param_grid is None:
         param_grid = _auto_grid(strategy_cls)
 

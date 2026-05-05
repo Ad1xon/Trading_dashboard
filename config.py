@@ -1,4 +1,4 @@
-"""Project configuration – symbols, defaults, trading constants, ML hyperparameters."""
+"""Project configuration — symbols, defaults, trading constants, ML hyperparameters."""
 
 import json
 import os
@@ -24,10 +24,29 @@ MT5_SYMBOLS = {
     "DEUR40 (DAX)": "D40EUR.ecn",
     "GBPJPY": "GBPJPY.ecn",
     "USDJPY": "USDJPY.ecn",
+    "AUDUSD": "AUDUSD.ecn",
+    "USDCAD": "USDCAD.ecn",
+    "EURGBP": "EURGBP.ecn",
+    "NZDUSD": "NZDUSD.ecn",
+    "USDCHF": "USDCHF.ecn",
+    "US500 (S&P)": "S&P500.ecn",
+    "UK100 (FTSE)": "UK100.ecn",
+    "XAGUSD (Silver)": "XAGUSDs",
+    "USOIL (WTI)": "USOIL.ecn",
+    "NGAS (Nat Gas)": "NGAS.ecn",
     "AAPL": "AAPL",
     "TSLA": "TSLA",
+    "NVDA": "NVDA",
+    "MSFT": "MSFT",
+    "AMZN": "AMZN",
+    "GOOG": "GOOG",
+    "META": "META",
     "BTCUSD": "BTCUSDT.ecn",
     "ETHUSD": "ETHUSDT.ecn",
+    "SOLUSD": "SOLUSDT.ecn",
+    "BNBUSD": "BNBUSDT.ecn",
+    "XRPUSD": "XRPUSDT.ecn",
+    "ADAUSD": "ADAUSDT.ecn",
 }
 
 COMMISSION_USD_PER_LOT = 6.0
@@ -39,11 +58,39 @@ CONTRACT_SIZES = {
     "DEUR40 (DAX)": 1,
     "GBPJPY": 100000,
     "USDJPY": 100000,
+    "AUDUSD": 100000,
+    "USDCAD": 100000,
+    "EURGBP": 100000,
+    "NZDUSD": 100000,
+    "USDCHF": 100000,
+    "US500 (S&P)": 1,
+    "UK100 (FTSE)": 1,
+    "XAGUSD (Silver)": 5000,
+    "USOIL (WTI)": 1000,
+    "NGAS (Nat Gas)": 10000,
     "AAPL": 1,
     "TSLA": 1,
+    "NVDA": 1,
+    "MSFT": 1,
+    "AMZN": 1,
+    "GOOG": 1,
+    "META": 1,
     "BTCUSD": 1,
     "ETHUSD": 1,
+    "SOLUSD": 1,
+    "BNBUSD": 1,
+    "XRPUSD": 1,
+    "ADAUSD": 1,
 }
+
+PAIRS_TRADING_PAIRS = [
+    ("EURUSD.ecn", "GBPUSD.ecn"),
+    ("XAUUSDs", "XAGUSD.ecn"),
+    ("AAPL", "MSFT"),
+    ("BTCUSDT.ecn", "ETHUSDT.ecn"),
+    ("USDJPY.ecn", "GBPJPY.ecn"),
+    ("NASUSD.ecn", "SP500.ecn"),
+]
 
 MFE_ACTIVATION_MULTIPLIER = 1.0
 MFE_TRAIL_PCT = 0.5
@@ -87,13 +134,17 @@ SENTIMENT_ROLLING_WINDOW = 50
 HMM_N_STATES = 3
 HMM_COVARIANCE_TYPE = "full"
 
+KELLY_FRACTION_CAP = 0.25
+
 DEFAULT_STRATEGIES = {
-    "ZScore Rev": "ZScoreMeanReversion",
-    "SMC Breakout": "VolatilityBreakout",
-    "XGB Breakout": "MLVolatilityBreakout",
-    "XGB Bounce": "MLBounceReversion",
-    "VWAP Bounce": "VWAPBounceStrategy",
-    "MTF Momentum": "MultiTimeframeMomentum",
-    "LGBM Arab Scalp": "ArabianScalper",
+    "Composite Alpha (MFT)": "CompositeAlphaStrategy",
     "LSTM Swing": "LSTMSwingStrategy",
+    "Regime Switch (HMM)": "RegimeSwitchStrategy",
+    "XGB Breakout (ML)": "MLVolatilityBreakout",
+    "LGBM Arab Scalp (ML)": "ArabianScalper",
+    "Pairs Trading (Stat Arb)": "PairsTradingStrategy",
+    "MTF Momentum": "MultiTimeframeMomentum",
+    "VWAP Bounce": "VWAPBounceStrategy",
+    "SMC Breakout": "VolatilityBreakout",
+    "ZScore Rev": "ZScoreMeanReversion",
 }

@@ -1,17 +1,23 @@
-"""Trading strategies registry."""
+"""Trading strategies registry — ordered by complexity (most sophisticated first)."""
 
 from .reversion import ZScoreMeanReversion, VWAPBounceStrategy, MultiTimeframeMomentum
 from .breakout import VolatilityBreakout, MLVolatilityBreakout
 from .arabian_scalper import ArabianScalper
 from .detectors import detect_liquidity_sweep
 from .lstm_swing import LSTMSwingStrategy
+from .pairs_trading import PairsTradingStrategy
+from .regime_switch import RegimeSwitchStrategy
+from .composite_alpha import CompositeAlphaStrategy
 
 STRATEGY_REGISTRY = {
-    'ZScore Rev': ZScoreMeanReversion,
-    'SMC Breakout': VolatilityBreakout,
-    'XGB Breakout': MLVolatilityBreakout,
-    'VWAP Bounce': VWAPBounceStrategy,
-    'MTF Momentum': MultiTimeframeMomentum,
-    'LGBM Arab Scalp': ArabianScalper,
+    'Composite Alpha (MFT)': CompositeAlphaStrategy,
     'LSTM Swing': LSTMSwingStrategy,
+    'Regime Switch (HMM)': RegimeSwitchStrategy,
+    'XGB Breakout (ML)': MLVolatilityBreakout,
+    'LGBM Arab Scalp (ML)': ArabianScalper,
+    'Pairs Trading (Stat Arb)': PairsTradingStrategy,
+    'MTF Momentum': MultiTimeframeMomentum,
+    'VWAP Bounce': VWAPBounceStrategy,
+    'SMC Breakout': VolatilityBreakout,
+    'ZScore Rev': ZScoreMeanReversion,
 }

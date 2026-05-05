@@ -7,16 +7,28 @@ import pytest
 from quant_engine.ml_models import XGBoostRangeBarModel, StatArbMLFilter
 
 
-
 class TestXGBoostRangeBarModel:
     def test_build_features_columns(self, synthetic_ohlcv):
         model = XGBoostRangeBarModel()
         features = model.build_features(synthetic_ohlcv)
-        for col in model.FEATURE_COLS:
+        for col in model.feature_cols:
             assert col in features.columns, f"Missing feature column: {col}"
 
+    def test_garch_vol_in_features(self, synthetic_ohlcv):
+        """GARCH_Vol should be computed as a feature."""
+        model = XGBoostRangeBarModel()
+        features = model.build_features(synthetic_ohlcv)
+        assert 'GARCH_Vol' in features.columns
+        assert features['GARCH_Vol'].notna().sum() > 0
+
+    def test_variance_ratio_in_features(self, synthetic_ohlcv):
+        """Variance_Ratio should be computed as a feature."""
+        model = XGBoostRangeBarModel()
+        features = model.build_features(synthetic_ohlcv)
+        assert 'Variance_Ratio' in features.columns
+
     def test_walk_forward_no_lookahead(self, synthetic_ohlcv):
-        """Walk-forward predictions should ONLY exist for the OOS portion         (after the initial 70% training window)."""
+        """Walk-forward predictions should ONLY exist for the OOS portion."""
         model = XGBoostRangeBarModel()
         result = model.train(synthetic_ohlcv, initial_train_frac=0.70)
 
@@ -68,7 +80,6 @@ class TestXGBoostRangeBarModel:
         model = XGBoostRangeBarModel()
         probs = model.predict_proba(synthetic_ohlcv)
         assert (probs == 0.5).all()
-
 
 
 class TestStatArbMLFilter:

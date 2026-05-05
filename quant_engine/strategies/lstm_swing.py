@@ -3,8 +3,12 @@
 import pandas as pd
 import numpy as np
 from .base import BaseStrategy
-from ..ml_models.lstm_model import LSTMSwingModel
 from ..indicators import calculate_atr
+
+try:
+    from ..ml_models.lstm_model import LSTMSwingModel
+except ImportError:
+    LSTMSwingModel = None
 
 
 class LSTMSwingStrategy(BaseStrategy):

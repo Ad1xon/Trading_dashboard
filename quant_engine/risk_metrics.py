@@ -1,7 +1,10 @@
-"""Portfolio-level risk metrics — VaR, CVaR, correlation matrix, position correlation tracking."""
+"""Portfolio-level risk metrics — VaR, CVaR, Kelly, MAE/MFE, correlation matrix."""
 
 import numpy as np
 import pandas as pd
+from scipy import stats as sp_stats
+
+from config import KELLY_FRACTION_CAP
 
 
 def compute_var(returns: np.ndarray, confidence: float = 0.95) -> float:
@@ -18,6 +21,72 @@ def compute_cvar(returns: np.ndarray, confidence: float = 0.95) -> float:
     var = compute_var(returns, confidence)
     tail = returns[returns <= var]
     return float(tail.mean()) if len(tail) > 0 else var
+
+
+def compute_parametric_var(
+    returns: np.ndarray,
+    confidence: float = 0.95,
+    method: str = "cornish_fisher",
+) -> float:
+    """Parametric VaR with optional Cornish-Fisher skewness/kurtosis correction."""
+    if len(returns) < 30:
+        return compute_var(returns, confidence)
+
+    mu = np.mean(returns)
+    sigma = np.std(returns, ddof=1)
+    z = sp_stats.norm.ppf(1 - confidence)
+
+    if method == "cornish_fisher":
+        s = sp_stats.skew(returns)
+        k = sp_stats.kurtosis(returns, fisher=True)
+        z_cf = z + (z**2 - 1) * s / 6 + (z**3 - 3 * z) * k / 24 - (2 * z**3 - 5 * z) * s**2 / 36
+        return float(mu + z_cf * sigma)
+
+    return float(mu + z * sigma)
+
+
+def compute_kelly_fraction(win_rate: float, avg_win: float, avg_loss: float) -> float:
+    """Kelly Criterion optimal fraction: f* = (p·b - q) / b."""
+    if avg_loss <= 0 or win_rate <= 0:
+        return 0.0
+    b = avg_win / avg_loss
+    q = 1.0 - win_rate
+    kelly = (win_rate * b - q) / b
+    return float(min(max(kelly, 0.0), KELLY_FRACTION_CAP))
+
+
+def compute_mae_mfe(trades: list) -> dict:
+    """Maximum Adverse Excursion and Maximum Favorable Excursion analysis."""
+    if not trades:
+        return {"mae_mean": 0.0, "mfe_mean": 0.0, "efficiency": 0.0}
+    pnls = np.array([t['pnl'] for t in trades])
+    entries = np.array([t['entry_price'] for t in trades])
+    exits = np.array([t['exit_price'] for t in trades])
+    types = np.array([t['type'] for t in trades])
+
+    mae_pcts = []
+    mfe_pcts = []
+    efficiencies = []
+
+    for i, t in enumerate(trades):
+        move = (exits[i] - entries[i]) / (entries[i] + 1e-10) * types[i]
+        if move > 0:
+            mfe_pcts.append(move)
+            mae_pcts.append(0.0)
+        else:
+            mfe_pcts.append(0.0)
+            mae_pcts.append(abs(move))
+
+        if abs(move) > 1e-10:
+            efficiencies.append(move / (abs(move) + 1e-10))
+
+    return {
+        "mae_mean": float(np.mean(mae_pcts)) if mae_pcts else 0.0,
+        "mfe_mean": float(np.mean(mfe_pcts)) if mfe_pcts else 0.0,
+        "mae_values": mae_pcts,
+        "mfe_values": mfe_pcts,
+        "efficiency": float(np.mean(efficiencies)) if efficiencies else 0.0,
+    }
 
 
 def compute_correlation_matrix(equity_dict: dict[str, np.ndarray]) -> pd.DataFrame:
@@ -80,6 +149,7 @@ def compute_portfolio_risk_report(
         per_strategy[name] = {
             "var": compute_var(rets, confidence),
             "cvar": compute_cvar(rets, confidence),
+            "parametric_var": compute_parametric_var(rets, confidence),
             "sharpe": (mean_ret / (std_ret + 1e-10)) * np.sqrt(bars_per_year),
         }
 
