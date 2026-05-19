@@ -8,13 +8,13 @@ Event-driven quantitative trading system with HMM regime detection, GARCH volati
 
 ```mermaid
 graph TB
-    subgraph Data Layer
+    subgraph Data_Layer ["Data Layer"]
         MT5["MetaTrader5 Connector"] --> DP["Data Processor"]
         NLP["NLP Sentiment Engine<br/>5 RSS Sources + FinBERT"] --> DP
         MACRO["Macro Filter<br/>ForexFactory Calendar"] --> DP
     end
 
-    subgraph Quant Engine
+    subgraph Quant_Engine ["Quant Engine"]
         DP --> IND["Indicators<br/>ATR, ADX, VWAP"]
         DP --> GARCH["GARCH/EWMA<br/>Volatility Model"]
         DP --> HMM["Regime Detector<br/>Gaussian HMM 3-State"]
