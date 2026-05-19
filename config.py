@@ -1,7 +1,16 @@
-"""Project configuration — symbols, defaults, trading constants, ML hyperparameters."""
+"""Project configuration — symbols, defaults, trading constants, ML hyperparameters, live bot params.
+
+All sensitive credentials are loaded from environment variables (or a .env file via python-dotenv).
+"""
 
 import json
 import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def load_translations(lang_code: str) -> dict:
@@ -147,4 +156,20 @@ DEFAULT_STRATEGIES = {
     "VWAP Bounce": "VWAPBounceStrategy",
     "SMC Breakout": "VolatilityBreakout",
     "ZScore Rev": "ZScoreMeanReversion",
+    "Ultimate MFT": "UltimateMFTStrategy",
+    "Ultimate Swing": "UltimateSwingStrategy",
 }
+
+
+LIVE_POLL_INTERVAL_SECONDS = 5
+LIVE_MAX_DAILY_DRAWDOWN_PCT = 0.03
+LIVE_MAX_CONSECUTIVE_LOSSES = 5
+LIVE_MAX_TOTAL_EXPOSURE_LOTS = 10.0
+LIVE_RECONNECT_BASE_DELAY = 2.0
+LIVE_RECONNECT_MAX_DELAY = 300.0
+LIVE_HEARTBEAT_INTERVAL = 60
+
+LIVE_MFT_SYMBOLS = ["EURUSD.ecn", "GBPUSD.ecn", "XAUUSDs"]
+LIVE_SWING_SYMBOLS = ["EURUSD.ecn", "XAUUSDs", "NASUSD.ecn"]
+LIVE_MFT_TIMEFRAME = "M5"
+LIVE_SWING_TIMEFRAME = "H4"

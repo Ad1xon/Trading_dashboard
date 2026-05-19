@@ -30,7 +30,7 @@ from quant_engine.macro_filter import MacroFilter
 from quant_engine.scanner import MarketScanner
 
 
-SWING_STRATEGIES = {'LSTM Swing', 'Composite Alpha (MFT)', 'Regime Switch (HMM)'}
+SWING_STRATEGIES = {'LSTM Swing', 'Composite Alpha (MFT)', 'Regime Switch (HMM)', 'Ultimate Swing'}
 
 
 def _get_alert_manager() -> AlertManager:

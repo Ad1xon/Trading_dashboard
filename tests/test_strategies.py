@@ -155,6 +155,7 @@ class TestVolatilityBreakout:
 class TestStrategyRegistry:
     def test_registry_complete(self):
         expected = {
+            'Ultimate MFT', 'Ultimate Swing',
             'Composite Alpha (MFT)', 'LSTM Swing', 'Regime Switch (HMM)',
             'XGB Breakout (ML)', 'LGBM Arab Scalp (ML)', 'Pairs Trading (Stat Arb)',
             'MTF Momentum', 'VWAP Bounce', 'SMC Breakout', 'ZScore Rev',

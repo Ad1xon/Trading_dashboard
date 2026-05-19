@@ -1,4 +1,8 @@
-"""Advanced backtester with market realism (costs, dynamic slippage, spread, delay, fill probability)."""
+"""Advanced backtester with separated realized/floating PnL and institutional cost modeling.
+
+Critical fix: realized_equity is the hard ledger (updated only on trade close after costs).
+floating_equity is computed per-bar for drawdown/curve purposes but never double-counted.
+"""
 
 import pandas as pd
 import numpy as np
@@ -16,7 +20,13 @@ def run_advanced_backtest(
     commission_pct: float,
     symbol: str = "EURUSD",
 ) -> dict:
-    """Run an event-driven backtest on OHLCV or range-bar data."""
+    """Run an event-driven backtest with strict realized vs floating PnL separation.
+
+    Key accounting principle:
+        realized_equity — updated ONLY when a trade is closed, after all costs.
+        floating_pnl   — mark-to-market unrealized PnL on the open position.
+        equity_curve[i] = realized_equity + floating_pnl  (for DD / Sharpe calc).
+    """
     from config import (
         MFE_ACTIVATION_MULTIPLIER, MFE_TRAIL_PCT,
         CONTRACT_SIZES, MAX_ALLOWED_LOTS,
@@ -83,12 +93,13 @@ def run_advanced_backtest(
     strat_mfe_activation = strategy.params.get('mfe_activation', [MFE_ACTIVATION_MULTIPLIER])[0]
     strat_mfe_trail_pct = strategy.params.get('mfe_trail_pct', [MFE_TRAIL_PCT])[0]
 
-    current_equity = initial_capital
+    realized_equity = initial_capital
     current_position = 0
     entry_price = 0.0
     position_size_usd = 0.0
     bars_held = 0
     entry_idx = 0
+    accumulated_swap = 0.0
 
     high_since_entry = 0.0
     low_since_entry = float('inf')
@@ -108,27 +119,27 @@ def run_advanced_backtest(
     bankrupt = False
 
     for i in range(1, n):
-        if current_equity <= 0:
-            current_equity = 0.01
+        if realized_equity <= 0:
+            realized_equity = 0.01
             equity_curve[i:] = 0.01
             bankrupt = True
             break
 
         sig = signals[i]
-        pnl = 0.0
+        floating_pnl = 0.0
 
         if current_position != 0:
-            price_change_pct = (closes[i] - closes[i - 1]) / (closes[i - 1] + 1e-8)
-            pnl = price_change_pct * position_size_usd * current_position
-            
-            if i > 0 and isinstance(df.index, pd.DatetimeIndex):
+            """Compute floating (unrealized) PnL from entry price — never added to realized_equity."""
+            floating_pnl = (
+                (closes[i] - entry_price) / (entry_price + 1e-8)
+            ) * position_size_usd * current_position
+
+            if isinstance(df.index, pd.DatetimeIndex) and i > 0:
                 if df.index[i].date() != df.index[i - 1].date():
                     swap_rate = swap_long if current_position == 1 else swap_short
                     sz = position_size_usd / (contract_size * entry_price + 1e-8)
-                    swap_cost = sz * swap_rate
-                    pnl += swap_cost
+                    accumulated_swap += sz * swap_rate
 
-            current_equity += pnl
             bars_held += 1
 
             high_since_entry = max(high_since_entry, highs[i])
@@ -146,12 +157,6 @@ def run_advanced_backtest(
                 if risk_dist > 0 and mfe > risk_dist * strat_mfe_activation:
                     candidate = entry_price - mfe * strat_mfe_trail_pct
                     dynamic_sl = min(dynamic_sl, candidate) if not np.isnan(dynamic_sl) else candidate
-
-            if current_equity <= 0:
-                current_equity = 0.01
-                equity_curve[i:] = 0.01
-                bankrupt = True
-                break
 
         exit_signal = (
             (current_position == 1 and exit_longs[i])
@@ -199,7 +204,7 @@ def run_advanced_backtest(
                 (actual_exit - entry_price) / (entry_price + 1e-8)
             ) * position_size_usd * current_position
 
-            transaction_cost = trade_pnl_raw * (TRANSACTION_COST_BPS / 10_000)
+            transaction_cost = abs(trade_pnl_raw) * (TRANSACTION_COST_BPS / 10_000)
 
             if contract_size == 100_000:
                 nominal_lot_value = contract_size
@@ -209,8 +214,10 @@ def run_advanced_backtest(
             lots_traded = position_size_usd / (nominal_lot_value + 1e-8)
             commission_cost = lots_traded * 6.0 * 2
 
-            trade_pnl = trade_pnl_raw - commission_cost - transaction_cost
-            current_equity += (trade_pnl - pnl)
+            trade_pnl = trade_pnl_raw - commission_cost - transaction_cost + accumulated_swap
+
+            """Hard book the realized PnL — the only place realized_equity changes."""
+            realized_equity += trade_pnl
 
             if sl_hit and not np.isnan(dynamic_sl) and active_sl == dynamic_sl:
                 exit_reason = 'MFE_TRAIL'
@@ -237,6 +244,8 @@ def run_advanced_backtest(
             position_size_usd = 0.0
             bars_held = 0
             dynamic_sl = np.nan
+            accumulated_swap = 0.0
+            floating_pnl = 0.0
 
         if current_position == 0 and sig != 0:
 
@@ -254,7 +263,7 @@ def run_advanced_backtest(
                 spread_price = AVERAGE_SPREAD_PIPS * 0.0001 * closes[i]
                 entry_price = closes[i] + real_slippage + (spread_price if sig == 1 else -spread_price)
                 vol = stds[i] if not np.isnan(stds[i]) and stds[i] > 0 else (closes[i] * 0.001)
-                risk_amt = current_equity * risk_percent
+                risk_amt = realized_equity * risk_percent
                 calculated_usd = risk_amt / ((vol * 2) / (entry_price + 1e-8) + 1e-6)
 
                 if contract_size == 100_000:
@@ -272,8 +281,10 @@ def run_advanced_backtest(
                 high_since_entry = highs[entry_idx]
                 low_since_entry = lows[entry_idx]
                 dynamic_sl = np.nan
+                accumulated_swap = 0.0
 
-        equity_curve[i] = current_equity
+        """Equity curve = realized + floating (mark-to-market), never double-counted."""
+        equity_curve[i] = realized_equity + floating_pnl
 
     trades_history = []
     index_vals = df.index.values
