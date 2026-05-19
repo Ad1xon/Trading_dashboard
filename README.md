@@ -15,21 +15,30 @@ graph TB
     end
 
     subgraph Quant Engine
-        DP --> IND["Indicators<br/>RSI, ATR, VWAP, BB, ADX, MACD"]
+        DP --> IND["Indicators<br/>ATR, ADX, VWAP"]
         DP --> GARCH["GARCH/EWMA<br/>Volatility Model"]
         DP --> HMM["Regime Detector<br/>Gaussian HMM 3-State"]
-        IND --> STRAT["Strategy Registry<br/>10 Strategies"]
+        DP --> MICRO["Microstructure<br/>OFI, CVD, LOB, SuperTrend"]
+        IND --> STRAT["Strategy Registry<br/>12 Strategies"]
         GARCH --> STRAT
         HMM --> STRAT
+        MICRO --> STRAT
         STRAT --> BT["Backtester<br/>Event-Driven + Market Realism"]
         BT --> RISK["Risk Metrics<br/>VaR, CVaR, Kelly, MAE/MFE"]
         BT --> MC["Monte Carlo<br/>Bootstrap Simulation"]
     end
 
-    subgraph ML Models
+    subgraph ML_Models ["ML Models — Async Layer"]
         XGB["XGBoost<br/>Walk-Forward"] --> STRAT
         LGBM["LightGBM<br/>Walk-Forward"] --> STRAT
-        LSTM["PyTorch LSTM<br/>Swing Strategy"] --> STRAT
+        LSTM["PyTorch LSTM<br/>Background Retrain Thread"] --> STRAT
+    end
+
+    subgraph Live_Engine ["Live Engine — Event-Driven"]
+        CANDLE["Candle Gate<br/>New-Bar Detection"] --> SIG["Signal Gen"]
+        SIG --> ARB["Signal Arbiter<br/>MFT+Swing Fusion"]
+        ARB --> EXEC["Order Executor<br/>MT5 Market Orders"]
+        EXEC --> TRAIL["Trailing SL<br/>GARCH-Adaptive MFE"]
     end
 
     subgraph Dashboard
@@ -43,22 +52,25 @@ graph TB
 
     BT --> ST
     RISK --> ST
+    STRAT --> CANDLE
 ```
 
 ## Strategies
 
 | # | Strategy | Type | ML | Key Technique |
 |---|---|---|---|---|
-| 1 | **Composite Alpha** | Multi-factor | — | 5-factor fusion with ADX-adaptive weighting and GARCH-scaled SL/TP |
-| 2 | **LSTM Swing** | Deep Learning | PyTorch LSTM | Walk-forward trained sequence model for daily/H4 swing trading |
-| 3 | **Regime Switch** | Meta-Strategy | HMM | GARCH-scaled adaptive switching between momentum and mean-reversion |
-| 4 | **XGB Breakout** | ML Breakout | XGBoost | Walk-forward classifier with 13-feature matrix |
-| 5 | **LGBM Arab Scalp** | ML Scalper | LightGBM | SuperTrend + Weis Wave Volume with LightGBM confirmation |
-| 6 | **Pairs Trading** | Stat Arb | — | Engle-Granger cointegration + Ornstein-Uhlenbeck half-life |
-| 7 | **MTF Momentum** | Trend | — | Slow MA trend + fast-RSI pullback entry |
-| 8 | **VWAP Bounce** | Reversion | — | Session-reset VWAP band bounce with volume confirmation |
-| 9 | **SMC Breakout** | Breakout | — | Smart Money Concepts breakout with ATR stops |
-| 10 | **ZScore Rev** | Reversion | — | Z-score extremes with RSI + ADX regime filter |
+| 1 | **Ultimate MFT** | Microstructure | — | 4-stage cascade: GARCH regime → OFI impulse → CVD confirmation → SuperTrend gate |
+| 2 | **Ultimate Swing** | Deep Learning | PyTorch LSTM | Decoupled async ML — background retrain, fast inference only in hot path |
+| 3 | **Composite Alpha** | Multi-factor | — | 5-factor fusion with ADX-adaptive weighting and GARCH-scaled SL/TP |
+| 4 | **LSTM Swing** | Deep Learning | PyTorch LSTM | Walk-forward trained sequence model for daily/H4 swing trading |
+| 5 | **Regime Switch** | Meta-Strategy | HMM | GARCH-scaled adaptive switching between momentum and mean-reversion |
+| 6 | **XGB Breakout** | ML Breakout | XGBoost | Walk-forward classifier with 13-feature matrix |
+| 7 | **LGBM Arab Scalp** | ML Scalper | LightGBM | SuperTrend + Weis Wave Volume with LightGBM confirmation |
+| 8 | **Pairs Trading** | Stat Arb | — | Engle-Granger cointegration + Ornstein-Uhlenbeck half-life |
+| 9 | **MTF Momentum** | Trend | — | Slow MA trend + fast-RSI pullback entry |
+| 10 | **VWAP Bounce** | Reversion | — | Session-reset VWAP band bounce with volume confirmation |
+| 11 | **SMC Breakout** | Breakout | — | Smart Money Concepts breakout with ATR stops |
+| 12 | **ZScore Rev** | Reversion | — | Z-score extremes with RSI + ADX regime filter |
 
 ## Mathematical Framework
 
@@ -104,29 +116,30 @@ $$ \text{SL}_t = \text{Close}_t - \underbrace{\frac{\hat{\sigma}_t}{\bar{\sigma}
 
 ---
 
-### Composite Alpha Score
+### Ultimate MFT — Cascading Microstructure Gate
 
-$$
-\text{Score}_t = w_{\text{trend}} \cdot M_t \cdot 0.35 + w_{\text{rev}} \cdot R_t \cdot 0.25 + V_t \cdot 0.20 + D_t \cdot 0.15 + G_t \cdot 0.05
-$$
+The MFT strategy uses a strict 4-stage cascade.
 
-where $w_{\text{trend}} = \text{clip}\left( \frac{\text{ADX}}{40}, 0, 1 \right)$ and $w_{\text{rev}} = 1 - w_{\text{trend}}$.
+```mermaid
+graph LR
+    S1["Stage 1<br/>GARCH Regime"] -->|Low/Normal Vol| S2["Stage 2<br/>OFI Impulse"]
+    S1 -->|High Vol| HOLD1["HOLD"]
+    S2 -->|OFI_Z > ±threshold| S3["Stage 3<br/>CVD + LOB Confirm"]
+    S2 -->|No Impulse| HOLD2["HOLD"]
+    S3 -->|CVD + LOB Agree| S4["Stage 4<br/>Cost + SuperTrend"]
+    S3 -->|Flow Conflict| HOLD3["HOLD"]
+    S4 -->|All Pass| ENTER["ENTER"]
+    S4 -->|Fail| HOLD4["HOLD"]
+```
 
-| Factor | Symbol | Computation |
-|---|---|---|
-| Momentum | $M_t$ | Z-score of weighted multi-horizon returns (5/20/60 bars) |
-| Reversion | $R_t$ | Inverted Bollinger %B (60%) + inverted RSI (40%) |
-| Volume | $V_t$ | Order-flow proxy z-score (70%) + volume surge (30%) |
-| MACD | $D_t$ | MACD histogram z-score (30-bar) |
-| Volatility | $G_t$ | Inverse GARCH ratio |
+| Stage | Gate | Configurable Param | Default |
+|---|---|---|---|
+| 1 | GARCH vol ratio ≤ cutoff | `garch_high_vol_cutoff` | 1.5 |
+| 2 | OFI_Z > ± threshold | `ofi_impulse_threshold` | 1.0 |
+| 3 | CVD slope z + LOB z agree | `cvd_confirm_threshold`, `lob_confirm_threshold` | 0.3, 0.3 |
+| 4 | ATR > cost × mult, SuperTrend, Volume floor | `cost_hurdle_mult`, `vol_floor_mult` | 2.5, 1.2 |
 
-**Inverse GARCH ratio formula:**
-
-$$
-G_t = -\left( \frac{\hat{\sigma}_t}{\bar{\sigma}_{60}} - 1 \right)
-$$
-
-**Entry Condition:** Score<sub>t</sub> > θ<sub>long</sub> = 0.15 and volume > 80% of 20-bar avg.
+**Active exits:** OFI reversal (flow collapse) or Chandelier exit (configurable ATR mult).
 
 ---
 

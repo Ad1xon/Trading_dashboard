@@ -8,8 +8,12 @@ from .lstm_swing import LSTMSwingStrategy
 from .pairs_trading import PairsTradingStrategy
 from .regime_switch import RegimeSwitchStrategy
 from .composite_alpha import CompositeAlphaStrategy
+from .ultimate_mft import UltimateMFTStrategy
+from .ultimate_swing import UltimateSwingStrategy
 
 STRATEGY_REGISTRY = {
+    'Ultimate MFT': UltimateMFTStrategy,
+    'Ultimate Swing': UltimateSwingStrategy,
     'Composite Alpha (MFT)': CompositeAlphaStrategy,
     'LSTM Swing': LSTMSwingStrategy,
     'Regime Switch (HMM)': RegimeSwitchStrategy,

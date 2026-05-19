@@ -41,10 +41,10 @@ st.title(T.get('title', 'Quant Dashboard'))
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     T.get("tab_scanner", "Market Scanner (VWAP)"),
     T.get("tab_backtester", "Advanced Backtester"),
-    "Strategy Leaderboard",
+    T.get("tab_leaderboard", "Strategy Leaderboard"),
     T.get("tab_alerts", "Alert Center"),
-    "Macro & Sentiment",
-    "Pairs Trading",
+    T.get("tab_sentiment", "Macro & Sentiment"),
+    T.get("tab_pairs", "Pairs Trading"),
 ])
 
 with tab1:

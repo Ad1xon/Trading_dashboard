@@ -37,6 +37,7 @@ venv/
 *.dat
 *.out
 *.log
+live_state.json
 *.h5
 *.hdf5
 *.parquet
